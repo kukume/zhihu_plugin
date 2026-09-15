@@ -1,0 +1,96 @@
+{
+  "name": "zhihu-plugin",
+  "displayName": "知乎",
+  "description": "在侧栏浏览知乎推荐、解码盐选，并在编辑器中阅读详情与评论",
+  "version": "0.1.0",
+  "publisher": "kuku",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "知乎",
+      "properties": {
+        "zhihu.baseUrl": {
+          "type": "string",
+          "description": "kukume/zhihu 后端 API 地址，必须配置"
+        },
+        "zhihu.recommendLimit": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "推荐列表每次加载条数"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "zhihu.refreshRecommend",
+        "title": "刷新推荐",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "zhihu.openInEditor",
+        "title": "在编辑器打开详情",
+        "icon": "$(open-preview)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "zhihu",
+          "title": "知乎",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "zhihu": [
+        {
+          "type": "webview",
+          "id": "zhihu.recommend",
+          "name": "推荐",
+          "retainContextWhenHidden": true
+        },
+        {
+          "type": "webview",
+          "id": "zhihu.decode",
+          "name": "Decode",
+          "retainContextWhenHidden": true
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "zhihu.refreshRecommend",
+          "when": "view == zhihu.recommend",
+          "group": "navigation"
+        },
+        {
+          "command": "zhihu.openInEditor",
+          "when": "view == zhihu.recommend",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --allow-missing-repository --out zhihu.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.6.0",
+    "typescript": "^5.7.2"
+  }
+}

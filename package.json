@@ -4,6 +4,10 @@
   "description": "在侧栏浏览知乎推荐、解码盐选，并在编辑器中阅读详情与评论",
   "version": "0.1.0",
   "publisher": "kuku",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kukume/zhihu_plugin.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -85,7 +89,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package --allow-missing-repository --out zhihu.vsix"
+    "package": "vsce package --out zhihu.vsix"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

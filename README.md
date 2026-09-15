@@ -19,7 +19,7 @@
 
 GitHub Actions 会在每次推送到默认分支时打包 `.vsix`，并**覆盖**名为 `latest` 的 Release（不会保留历史包）。
 
-1. 打开本仓库的 [Releases](../../releases/latest)，下载 `zhihu.vsix`。
+1. 打开本仓库的 [Releases](https://github.com/kukume/zhihu_plugin/releases/latest)，下载 `zhihu.vsix`。
 2. 在 VS Code / Cursor 中：扩展视图 → `...` → **Install from VSIX...**（从 VSIX 安装），选刚下载的文件。
 
 命令行也可以：

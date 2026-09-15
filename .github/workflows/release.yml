@@ -21,7 +21,7 @@ jobs:
 
       - run: npm ci
       - run: npm run compile
-      - run: npx @vscode/vsce package --allow-missing-repository --out zhihu.vsix
+      - run: npx @vscode/vsce package --out zhihu.vsix
 
       - name: Publish VSIX to latest release
         env:

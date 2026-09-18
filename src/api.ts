@@ -7,18 +7,48 @@ import type {
   RecommendItem,
 } from "./types";
 
+function getConfig() {
+  return vscode.workspace.getConfiguration("zhihu");
+}
+
 function getBaseUrl(): string {
-  const config = vscode.workspace.getConfiguration("zhihu");
-  const url = (config.get<string>("baseUrl") ?? "").trim().replace(/\/+$/, "");
+  const url = (getConfig().get<string>("baseUrl") ?? "").trim().replace(/\/+$/, "");
   if (!url) {
     throw new Error("请先在设置中配置 zhihu.baseUrl");
   }
   return url;
 }
 
+function getCookie(): string {
+  return (getConfig().get<string>("cookie") ?? "").trim();
+}
+
+function cookieConfigTarget(): vscode.ConfigurationTarget {
+  const inspect = getConfig().inspect<string>("cookie");
+  if (inspect?.workspaceFolderValue !== undefined) {
+    return vscode.ConfigurationTarget.WorkspaceFolder;
+  }
+  if (inspect?.workspaceValue !== undefined) {
+    return vscode.ConfigurationTarget.Workspace;
+  }
+  return vscode.ConfigurationTarget.Global;
+}
+
+async function persistCookieIfUpdated(res: Response, data: unknown): Promise<void> {
+  const fromHeader = res.headers.get("X-Zhihu-Cookie")?.trim() ?? "";
+  const fromBody =
+    data && typeof data === "object" && "cookie" in data && typeof (data as { cookie: unknown }).cookie === "string"
+      ? (data as { cookie: string }).cookie.trim()
+      : "";
+  const next = fromHeader || fromBody;
+  if (!next || next === getCookie()) {
+    return;
+  }
+  await getConfig().update("cookie", next, cookieConfigTarget());
+}
+
 export function getRecommendLimit(): number {
-  const config = vscode.workspace.getConfiguration("zhihu");
-  const n = config.get<number>("recommendLimit", 8);
+  const n = getConfig().get<number>("recommendLimit", 8);
   return Math.min(20, Math.max(1, n || 8));
 }
 
@@ -31,6 +61,11 @@ async function request<T>(
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
     const headers: Record<string, string> = {};
+    const cookie = getCookie();
+    if (cookie) {
+      headers.Cookie = cookie;
+      headers["X-Zhihu-Cookie"] = cookie;
+    }
     let body: string | undefined;
     if (options?.body !== undefined) {
       headers["Content-Type"] = "application/json";
@@ -50,6 +85,10 @@ async function request<T>(
       } catch {
         data = { error: text };
       }
+    }
+    await persistCookieIfUpdated(res, data);
+    if (data && typeof data === "object" && "cookie" in data) {
+      delete (data as { cookie?: string }).cookie;
     }
     if (!res.ok) {
       const err =

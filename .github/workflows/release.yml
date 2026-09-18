@@ -35,7 +35,7 @@ jobs:
           )"
           if gh release view latest >/dev/null 2>&1; then
             gh release upload latest zhihu.vsix --clobber
-            gh release edit latest --title "知乎" --notes "$NOTES"
+            gh release edit latest --title "zhihu" --notes "$NOTES"
           else
-            gh release create latest zhihu.vsix --title "知乎" --notes "$NOTES" --latest
+            gh release create latest zhihu.vsix --title "zhihu" --notes "$NOTES" --latest
           fi

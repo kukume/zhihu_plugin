@@ -72,6 +72,7 @@ export interface DecodeResponse {
   text: string;
   warnings: string[];
   cookie_refreshed?: boolean;
+  cookie?: string;
 }
 
 export interface LoginStatus {

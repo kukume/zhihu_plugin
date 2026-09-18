@@ -24,6 +24,12 @@
           "type": "string",
           "description": "kukume/zhihu 后端 API 地址，必须配置"
         },
+        "zhihu.cookie": {
+          "type": "string",
+          "default": "",
+          "editPresentation": "multiline",
+          "description": "知乎 Cookie（从浏览器复制登录后的 Cookie 头，如 z_c0=...; __zse_ck=...）。后端刷新后会自动覆盖"
+        },
         "zhihu.recommendLimit": {
           "type": "number",
           "default": 8,

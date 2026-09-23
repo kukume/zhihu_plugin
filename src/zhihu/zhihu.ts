@@ -1,7 +1,7 @@
 import { cookieFromRequest, hasLogin, parseCookieHeader } from "./cookies";
 import { extractArticleHtml, extractTitle, htmlToMarkdown, htmlToPlain, htmlToSegments } from "./html";
 import type { CookieJar } from "./http";
-import { zhihuRequest } from "./http";
+import { zhihuMultipartPost, zhihuRequest } from "./http";
 import { parseZhihuJson } from "./json";
 
 export function requireLogin(cookie: string): void {
@@ -60,6 +60,58 @@ function recommendFirstPage(): string {
   return "https://www.zhihu.com/api/v3/feed/topstory/recommend?limit=10&desktop=true";
 }
 
+type LastReadKind = "answer" | "post" | "question" | "pin";
+type LastReadAction = "touch" | "read";
+
+/** Map plugin content labels to /lastread/touch content kinds. */
+export function lastReadKindForType(type: string): LastReadKind | null {
+  if (isAnswerType(type)) return "answer";
+  if (isArticleType(type)) return "post";
+  if (isQuestionType(type)) return "question";
+  if (type === "想法" || type === "pin") return "pin";
+  return null;
+}
+
+async function postLastRead(
+  jar: CookieJar,
+  items: Array<[LastReadKind, string, LastReadAction]>,
+): Promise<void> {
+  if (!items.length) return;
+  const res = await zhihuMultipartPost("https://www.zhihu.com/lastread/touch", jar, {
+    items: JSON.stringify(items),
+  });
+  // Website treats 201 as success; ignore soft failures so opening content never breaks.
+  if (res.status !== 200 && res.status !== 201) {
+    throw new HttpError(res.status, `阅读上报失败: ${res.status}`);
+  }
+}
+
+/** Report open like the website: touch first, then read. */
+export async function reportContentOpen(
+  jar: CookieJar,
+  id: string | number,
+  type: string,
+): Promise<void> {
+  const kind = lastReadKindForType(type);
+  if (!kind) return;
+  const contentId = String(id);
+  if (!contentId) return;
+  await postLastRead(jar, [[kind, contentId, "touch"]]);
+  await postLastRead(jar, [[kind, contentId, "read"]]);
+}
+
+/** Hard ads (`feed_advert`) and native promoted cards (`promotion_extra` / plutus). */
+function isRecommendAd(item: Json): boolean {
+  const type = String(item.type ?? "");
+  if (type === "feed_advert" || type.includes("advert")) return true;
+  if (item.ad != null || item.adjson != null || item.ad_list != null) return true;
+  const promo = item.promotion_extra;
+  if (promo == null || promo === "") return false;
+  if (typeof promo === "string") return true;
+  if (typeof promo === "object") return true;
+  return false;
+}
+
 export async function fetchRecommendations(jar: CookieJar, startUrl?: string | null) {
   const pageUrl = startUrl || recommendFirstPage();
   const resp = await zhihuGet(pageUrl, jar);
@@ -74,9 +126,12 @@ export async function fetchRecommendations(jar: CookieJar, startUrl?: string | n
   const all: Json[] = [];
   const items = (data.data as Json[]) ?? [];
   for (const item of items) {
+      if (isRecommendAd(item)) continue;
       const t = (item.target as Json) ?? {};
-      const entry: Json = { type: contentTypeLabel(t) };
       const kind = String(t.type ?? "");
+      // Ads and odd cards often have no target.type; don't render empty placeholders.
+      if (!kind) continue;
+      const entry: Json = { type: contentTypeLabel(t) };
       if (kind === "answer") {
         const q = (t.question as Json) ?? {};
         const author = (t.author as Json) ?? {};
@@ -112,13 +167,15 @@ export async function fetchRecommendations(jar: CookieJar, startUrl?: string | n
         entry.author = author.name ?? "匿名";
         entry.content = stripTags(String(t.content ?? "")).slice(0, 200);
       } else {
-        entry.raw_type = t.type ?? "";
+        // Skip unsupported card types (zvideo, etc.) instead of showing empty rows.
+        continue;
       }
       all.push(entry);
   }
   const paging = (data.paging as Json) ?? {};
   const following = String(paging.next ?? "");
-  const isEnd = Boolean(paging.is_end) || !following || all.length === 0;
+  // Use the raw page size for end detection so an all-ad page doesn't stop pagination.
+  const isEnd = Boolean(paging.is_end) || !following || items.length === 0;
   return { items: all, next: isEnd ? null : following };
 }
 

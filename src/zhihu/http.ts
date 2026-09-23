@@ -30,10 +30,20 @@ function asTimeout(err: unknown): never {
   throw err;
 }
 
+type RawFetchInit = {
+  accept: string;
+  redirect: RequestRedirect;
+  navigate: boolean;
+  method?: string;
+  body?: BodyInit;
+  contentType?: string;
+  origin?: string;
+};
+
 async function rawFetch(
   url: string,
   jar: CookieJar,
-  init: { accept: string; redirect: RequestRedirect; navigate: boolean },
+  init: RawFetchInit,
 ): Promise<ZhihuHttpResult & { setCookie: string[] }> {
   const headers: Record<string, string> = {
     "User-Agent": UA,
@@ -53,13 +63,21 @@ async function rawFetch(
     headers.Referer = url;
   } else {
     headers.Referer = "https://www.zhihu.com/";
+    headers["sec-fetch-site"] = "same-origin";
+    headers["sec-fetch-mode"] = "cors";
+    headers["sec-fetch-dest"] = "empty";
+    headers["x-requested-with"] = "fetch";
   }
+  if (init.origin) headers.Origin = init.origin;
+  if (init.contentType) headers["Content-Type"] = init.contentType;
   if (jar.cookie) headers.Cookie = jar.cookie;
 
   let res: Response;
   try {
     res = await fetch(url, {
+      method: init.method ?? "GET",
       headers,
+      body: init.body,
       redirect: init.redirect,
       signal: AbortSignal.timeout(120000),
     });
@@ -84,7 +102,7 @@ export async function zhihuRequest(
   const accept = options?.accept ?? "application/json, text/plain, */*";
   const redirect = options?.redirect ?? "follow";
   const navigate = options?.navigate ?? accept.startsWith("text/html");
-  const init = { accept, redirect, navigate };
+  const init: RawFetchInit = { accept, redirect, navigate };
 
   let res = await rawFetch(url, jar, init);
   applySetCookie(jar, res.setCookie);
@@ -99,5 +117,31 @@ export async function zhihuRequest(
   if (isZseCkChallenge(res.status, res.text)) {
     throw new Error("知乎返回安全验证，本地生成 __zse_ck 后仍然失败");
   }
+  return { status: res.status, text: res.text, location: res.location };
+}
+
+/** POST multipart/form-data like the website's lastread/touch. */
+export async function zhihuMultipartPost(
+  url: string,
+  jar: CookieJar,
+  fields: Record<string, string>,
+): Promise<ZhihuHttpResult> {
+  const boundary = `----WebKitFormBoundary${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  const chunks: string[] = [];
+  for (const [name, value] of Object.entries(fields)) {
+    chunks.push(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`);
+  }
+  chunks.push(`--${boundary}--\r\n`);
+  const init: RawFetchInit = {
+    accept: "*/*",
+    redirect: "follow",
+    navigate: false,
+    method: "POST",
+    origin: "https://www.zhihu.com",
+    contentType: `multipart/form-data; boundary=${boundary}`,
+    body: chunks.join(""),
+  };
+  const res = await rawFetch(url, jar, init);
+  applySetCookie(jar, res.setCookie);
   return { status: res.status, text: res.text, location: res.location };
 }

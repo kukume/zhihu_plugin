@@ -4,6 +4,7 @@ import {
   getLoginStatus,
   getRecommendDetail,
   getRecommendations,
+  reportRecommendOpen,
   saveLoginCookie,
 } from "./api";
 import { QrLogin } from "./zhihu/qr-login";
@@ -208,6 +209,8 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
     this.selected = item;
     this.detail = undefined;
     this.post({ type: "detailLoading", item });
+    // Match website: touch first, then read. Do not block detail loading.
+    void reportRecommendOpen(item.id, item.type);
     const detail = await getRecommendDetail(item.id, item.type, {
       title: item.title,
       author: item.author,

@@ -8,6 +8,7 @@ import {
   fetchFullContent,
   fetchRecommendations,
   HttpError,
+  reportContentOpen,
   requireLogin,
 } from "./zhihu/zhihu";
 import type {
@@ -105,6 +106,18 @@ export async function getRecommendDetail(
       question_detail: detail.question_detail || undefined,
     };
   });
+}
+
+/** Fire-and-forget website-compatible open report: touch then read. */
+export async function reportRecommendOpen(id: string | number, type: string): Promise<void> {
+  try {
+    await withCookie(async (jar) => {
+      if (!hasLogin(parseCookieHeader(jar.cookie))) return;
+      await reportContentOpen(jar, id, type);
+    });
+  } catch {
+    // Reporting must never block reading.
+  }
 }
 
 export async function getComments(

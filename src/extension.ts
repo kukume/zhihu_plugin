@@ -1,3 +1,4 @@
+import "./zhihu/native-fetch";
 import * as vscode from "vscode";
 import { DecodeViewProvider } from "./decodeView";
 import { RecommendViewProvider } from "./recommendView";
@@ -13,6 +14,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(DecodeViewProvider.viewType, decode, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
+    vscode.commands.registerCommand("zhihu.backRecommend", () => recommend.showList()),
     vscode.commands.registerCommand("zhihu.refreshRecommend", () => recommend.refresh()),
     vscode.commands.registerCommand("zhihu.openInEditor", () => recommend.openInEditor()),
   );

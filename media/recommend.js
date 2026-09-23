@@ -6,15 +6,21 @@
   const detailPage = document.getElementById("detail-page");
   const listEl = document.getElementById("list");
   const listLoading = document.getElementById("list-loading");
-  const moreBtn = document.getElementById("btn-more");
   const detailEl = document.getElementById("detail");
-  const editorBtn = document.getElementById("btn-editor");
-
-  moreBtn.addEventListener("click", () => post("loadMore"));
-  document.getElementById("btn-back").addEventListener("click", showList);
-  document.getElementById("btn-editor").addEventListener("click", () => post("openInEditor"));
+  let hasMore = false;
+  let loading = false;
+  let onDetail = false;
 
   listEl.addEventListener("click", (e) => {
+    if (e.target.closest("#btn-qr")) {
+      post("startQrLogin");
+      return;
+    }
+    if (e.target.closest("#btn-qr-cancel")) {
+      post("cancelQrLogin");
+      renderLoggedOut("未登录");
+      return;
+    }
     const item = e.target.closest(".item");
     if (!item) return;
     post("openItem", { id: item.dataset.id, itemType: item.dataset.type });
@@ -24,35 +30,41 @@
     const msg = e.data || {};
     switch (msg.type) {
       case "listLoading":
+        loading = true;
         listLoading.classList.remove("hidden");
-        if (msg.reset) {
-          listEl.innerHTML = "";
-          moreBtn.classList.add("hidden");
-        }
+        if (msg.reset) listEl.innerHTML = "";
         break;
       case "listResult":
+        loading = false;
         listLoading.classList.add("hidden");
+        hasMore = !!msg.hasMore;
         if (msg.status && !msg.status.logged_in) {
-          listEl.innerHTML =
-            '<div class="empty">' + escapeHtml(msg.status.message || "未登录") + "</div>";
-          moreBtn.classList.add("hidden");
+          hasMore = false;
+          renderLoggedOut(msg.status.message);
         } else {
           renderList(msg.data || []);
-          moreBtn.classList.toggle("hidden", !msg.hasMore);
         }
+        if (!onDetail) requestAnimationFrame(requestMore);
+        break;
+      case "showList":
         showList();
         break;
       case "detailLoading":
         showDetail();
-        editorBtn.disabled = true;
         detailEl.innerHTML = renderDetailShell(msg.item, true);
         break;
       case "detailResult":
-        editorBtn.disabled = false;
         detailEl.innerHTML = renderDetailShell(msg.item, false, msg.detail);
         bindQuestionToggle();
         break;
+      case "qrLogin":
+        showQr(msg.image, msg.message);
+        break;
+      case "qrStatus":
+        setQrMessage(msg.message, !!msg.failed);
+        break;
       case "error":
+        loading = false;
         listLoading.classList.add("hidden");
         showToast(msg.message || "出错了");
         break;
@@ -60,19 +72,65 @@
   });
 
   function showList() {
-    listPage.classList.remove("hidden");
-    detailPage.classList.add("hidden");
+    onDetail = false;
+    listPage.classList.remove("pane-back");
+    detailPage.classList.add("pane-back");
+    post("viewMode", { detail: false });
+    requestAnimationFrame(requestMore);
   }
 
   function showDetail() {
-    listPage.classList.add("hidden");
-    detailPage.classList.remove("hidden");
-    window.scrollTo(0, 0);
+    onDetail = true;
+    listPage.classList.add("pane-back");
+    detailPage.classList.remove("pane-back");
+    detailPage.scrollTop = 0;
+    post("viewMode", { detail: true });
+  }
+
+  function listReachesViewportEnd() {
+    if (!listEl.querySelector(".item")) return false;
+    return listEl.getBoundingClientRect().bottom <= listPage.getBoundingClientRect().bottom + 24;
+  }
+
+  function requestMore() {
+    if (loading || !hasMore || onDetail || !listReachesViewportEnd()) return;
+    loading = true;
+    post("loadMore");
+  }
+
+  listPage.addEventListener("scroll", requestMore, { passive: true });
+  window.addEventListener("resize", requestMore);
+
+  function renderLoggedOut(message) {
+    listEl.innerHTML =
+      '<div class="empty"><div>' +
+      escapeHtml(message || "未登录") +
+      '</div><button id="btn-qr" class="text-btn" type="button">扫码登录</button></div>';
+  }
+
+  function showQr(image, message) {
+    listEl.innerHTML =
+      '<div class="qr-login"><img id="qr-img" alt="登录二维码" /><div id="qr-msg" class="qr-msg"></div><button id="btn-qr-cancel" class="text-btn" type="button">取消</button></div>';
+    const img = document.getElementById("qr-img");
+    if (img) img.src = image || "";
+    setQrMessage(message, false);
+  }
+
+  function setQrMessage(message, failed) {
+    const el = document.getElementById("qr-msg");
+    if (!el) return;
+    el.textContent = message || "";
+    if (failed && !document.getElementById("btn-qr")) {
+      el.insertAdjacentHTML(
+        "afterend",
+        '<button id="btn-qr" class="text-btn" type="button">重新扫码</button>',
+      );
+    }
   }
 
   function renderList(items) {
     if (!items.length) {
-      listEl.innerHTML = '<div class="empty">暂无推荐，确认后端已登录后刷新</div>';
+      listEl.innerHTML = '<div class="empty">暂无推荐</div>';
       return;
     }
     listEl.innerHTML = items

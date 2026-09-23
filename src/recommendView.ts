@@ -1,5 +1,12 @@
 import * as vscode from "vscode";
-import { getLoginStatus, getRecommendDetail, getRecommendLimit, getRecommendations } from "./api";
+import {
+  clearLoginCookie,
+  getLoginStatus,
+  getRecommendDetail,
+  getRecommendations,
+  saveLoginCookie,
+} from "./api";
+import { QrLogin } from "./zhihu/qr-login";
 import { DetailPanel } from "./detailPanel";
 import { getWebviewHtml } from "./html";
 import { isAnswerType, type RecommendDetail, type RecommendItem } from "./types";
@@ -9,9 +16,12 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
 
   private view?: vscode.WebviewView;
   private items: RecommendItem[] = [];
+  private articleHtml = new Map<string, string>();
+  private nextUrl: string | null = null;
   private selected?: RecommendItem;
   private detail?: RecommendDetail;
-  private limit = getRecommendLimit();
+  private qr?: QrLogin;
+  private qrTimer?: ReturnType<typeof setInterval>;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -34,8 +44,11 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
   }
 
   refresh(): void {
-    this.limit = getRecommendLimit();
     void this.loadList(true);
+  }
+
+  showList(): void {
+    this.post({ type: "showList" });
   }
 
   openInEditor(): void {
@@ -50,6 +63,16 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
     void this.view?.webview.postMessage(message);
   }
 
+  private rememberArticles(items: RecommendItem[]): RecommendItem[] {
+    return items.map((item) => {
+      if ((item.type === "文章" || item.type === "article") && item.content?.includes("<")) {
+        this.articleHtml.set(String(item.id), item.content);
+        return { ...item, content: undefined };
+      }
+      return item;
+    });
+  }
+
   private async handleMessage(msg: { type: string; [key: string]: unknown }): Promise<void> {
     try {
       switch (msg.type) {
@@ -57,18 +80,25 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
           await this.loadList(true);
           break;
         case "refresh":
-          this.limit = getRecommendLimit();
           await this.loadList(true);
           break;
         case "loadMore":
-          this.limit = Math.min(20, this.limit + getRecommendLimit());
           await this.loadList(false);
+          break;
+        case "startQrLogin":
+          await this.startQrLogin();
+          break;
+        case "cancelQrLogin":
+          this.stopQr();
           break;
         case "openItem":
           await this.openItem(String(msg.id), String(msg.itemType ?? ""));
           break;
         case "openInEditor":
           this.openInEditor();
+          break;
+        case "viewMode":
+          await vscode.commands.executeCommand("setContext", "zhihu.recommendDetail", !!msg.detail);
           break;
         case "openUrl":
           if (typeof msg.url === "string") {
@@ -82,12 +112,49 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private stopQr(): void {
+    if (this.qrTimer) clearInterval(this.qrTimer);
+    this.qrTimer = undefined;
+    this.qr = undefined;
+  }
+
+  private async startQrLogin(): Promise<void> {
+    this.stopQr();
+    const qr = new QrLogin();
+    this.qr = qr;
+    const started = await qr.start();
+    if (this.qr !== qr) return;
+    this.post({ type: "qrLogin", image: started.image, message: started.message });
+    this.qrTimer = setInterval(() => void this.pollQr(), 1500);
+  }
+
+  private async pollQr(): Promise<void> {
+    const qr = this.qr;
+    if (!qr) return;
+    const result = await qr.poll();
+    if (this.qr !== qr) return;
+    if (result.phase === "success") {
+      this.stopQr();
+      await saveLoginCookie(result.cookie);
+      await this.loadList(true);
+      return;
+    }
+    if (result.phase === "done") {
+      this.stopQr();
+      this.post({ type: "qrStatus", message: result.message, failed: true });
+      return;
+    }
+    this.post({ type: "qrStatus", message: result.message });
+  }
+
   private async loadList(reset: boolean): Promise<void> {
+    if (reset) this.stopQr();
     this.post({ type: "listLoading", reset });
     try {
       const status = await getLoginStatus();
       if (!status.logged_in) {
         this.items = [];
+        this.nextUrl = null;
         this.post({
           type: "listResult",
           data: [],
@@ -96,16 +163,39 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
         });
         return;
       }
-      const result = await getRecommendations(this.limit);
-      this.items = result.data ?? [];
+      if (!reset && !this.nextUrl) {
+        this.post({
+          type: "listResult",
+          data: this.items,
+          hasMore: false,
+          status,
+        });
+        return;
+      }
+      const result = await getRecommendations(reset ? null : this.nextUrl);
+      const incoming = this.rememberArticles(result.data ?? []);
+      this.items = reset ? incoming : appendRecommendations(this.items, incoming);
+      this.nextUrl = result.next;
       this.post({
         type: "listResult",
         data: this.items,
-        hasMore: this.items.length >= this.limit && this.limit < 20,
+        hasMore: Boolean(this.nextUrl),
         status,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (message === "登录已失效") {
+        await clearLoginCookie();
+        this.items = [];
+        this.nextUrl = null;
+        this.post({
+          type: "listResult",
+          data: [],
+          hasMore: false,
+          status: { logged_in: false, message: "登录已失效" },
+        });
+        return;
+      }
       this.post({ type: "error", message });
     }
   }
@@ -118,7 +208,11 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
     this.selected = item;
     this.detail = undefined;
     this.post({ type: "detailLoading", item });
-    const detail = await getRecommendDetail(item.id, item.type);
+    const detail = await getRecommendDetail(item.id, item.type, {
+      title: item.title,
+      author: item.author,
+      html: this.articleHtml.get(String(item.id)),
+    });
     this.detail = detail;
     this.post({
       type: "detailResult",
@@ -129,18 +223,29 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
   }
 }
 
+function recommendationKey(item: RecommendItem): string {
+  return [item.type, item.id ?? "", item.url ?? "", item.title ?? ""].join(":");
+}
+
+function appendRecommendations(current: RecommendItem[], incoming: RecommendItem[]): RecommendItem[] {
+  const seen = new Set(current.map(recommendationKey));
+  const next = current.slice();
+  for (const item of incoming) {
+    const key = recommendationKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(item);
+  }
+  return next;
+}
+
 const recommendBody = `
-<div id="app">
+<div id="app" class="recommend-app">
   <section id="list-page">
     <div id="list"></div>
     <div id="list-loading" class="loading hidden">加载中...</div>
-    <button id="btn-more" class="icon-btn icon-btn-block hidden" type="button" data-icon="more" title="加载更多" aria-label="加载更多"></button>
   </section>
-  <section id="detail-page" class="hidden">
-    <div class="toolbar sticky">
-      <button id="btn-back" class="icon-btn" type="button" data-icon="back" title="返回" aria-label="返回"></button>
-      <button id="btn-editor" class="icon-btn" type="button" data-icon="editor" title="在编辑器打开" aria-label="在编辑器打开" disabled></button>
-    </div>
+  <section id="detail-page" class="pane-back">
     <div id="detail"></div>
   </section>
 </div>

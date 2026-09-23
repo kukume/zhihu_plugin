@@ -174,7 +174,7 @@
 
   const ICONS = {
     refresh: strokeIcon(
-      '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15A9 9 0 1 1 5.64 5.64L1 10"/>',
+      '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
     ),
     back: strokeIcon('<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>'),
     editor: strokeIcon(

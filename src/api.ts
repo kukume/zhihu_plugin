@@ -1,4 +1,15 @@
 import * as vscode from "vscode";
+import { cookiesDiffer, hasLogin, parseCookieHeader } from "./zhihu/cookies";
+import { decodeZhihuUrl } from "./zhihu/decode";
+import type { CookieJar } from "./zhihu/http";
+import {
+  fetchChildComments,
+  fetchComments,
+  fetchFullContent,
+  fetchRecommendations,
+  HttpError,
+  requireLogin,
+} from "./zhihu/zhihu";
 import type {
   CommentsResponse,
   DecodeResponse,
@@ -9,14 +20,6 @@ import type {
 
 function getConfig() {
   return vscode.workspace.getConfiguration("zhihu");
-}
-
-function getBaseUrl(): string {
-  const url = (getConfig().get<string>("baseUrl") ?? "").trim().replace(/\/+$/, "");
-  if (!url) {
-    throw new Error("请先在设置中配置 zhihu.baseUrl");
-  }
-  return url;
 }
 
 function getCookie(): string {
@@ -34,96 +37,74 @@ function cookieConfigTarget(): vscode.ConfigurationTarget {
   return vscode.ConfigurationTarget.Global;
 }
 
-async function persistCookieIfUpdated(res: Response, data: unknown): Promise<void> {
-  const fromHeader = res.headers.get("X-Zhihu-Cookie")?.trim() ?? "";
-  const fromBody =
-    data && typeof data === "object" && "cookie" in data && typeof (data as { cookie: unknown }).cookie === "string"
-      ? (data as { cookie: string }).cookie.trim()
-      : "";
-  const next = fromHeader || fromBody;
-  if (!next || next === getCookie()) {
-    return;
-  }
-  await getConfig().update("cookie", next, cookieConfigTarget());
+async function persistCookie(cookie: string): Promise<void> {
+  await getConfig().update("cookie", cookie, cookieConfigTarget());
 }
 
-export function getRecommendLimit(): number {
-  const n = getConfig().get<number>("recommendLimit", 8);
-  return Math.min(20, Math.max(1, n || 8));
+export async function saveLoginCookie(cookie: string): Promise<void> {
+  await persistCookie(cookie);
 }
 
-async function request<T>(
-  path: string,
-  options?: { method?: string; body?: unknown },
-  timeout = 35000,
-): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+export async function clearLoginCookie(): Promise<void> {
+  await persistCookie("");
+}
+
+function rethrow(err: unknown): never {
+  if (err instanceof HttpError) throw new Error(err.message);
+  throw err;
+}
+
+async function withCookie<T>(fn: (jar: CookieJar) => Promise<T>): Promise<T> {
+  const before = getCookie();
+  const jar: CookieJar = { cookie: before };
   try {
-    const headers: Record<string, string> = {};
-    const cookie = getCookie();
-    if (cookie) {
-      headers.Cookie = cookie;
-      headers["X-Zhihu-Cookie"] = cookie;
-    }
-    let body: string | undefined;
-    if (options?.body !== undefined) {
-      headers["Content-Type"] = "application/json";
-      body = JSON.stringify(options.body);
-    }
-    const res = await fetch(`${getBaseUrl()}${path}`, {
-      method: options?.method ?? "GET",
-      headers,
-      body,
-      signal: controller.signal,
-    });
-    const text = await res.text();
-    let data: unknown = undefined;
-    if (text) {
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { error: text };
-      }
-    }
-    await persistCookieIfUpdated(res, data);
-    if (data && typeof data === "object" && "cookie" in data) {
-      delete (data as { cookie?: string }).cookie;
-    }
-    if (!res.ok) {
-      const err =
-        data && typeof data === "object" && "error" in data
-          ? String((data as { error: unknown }).error)
-          : `HTTP ${res.status}`;
-      throw new Error(err);
-    }
-    return data as T;
+    const result = await fn(jar);
+    if (cookiesDiffer(before, jar.cookie)) await persistCookie(jar.cookie);
+    return result;
   } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
-      throw new Error("请求超时");
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
+    if (cookiesDiffer(before, jar.cookie)) await persistCookie(jar.cookie);
+    rethrow(err);
   }
 }
 
 export async function getLoginStatus(): Promise<LoginStatus> {
-  return request<LoginStatus>("/");
+  const logged_in = hasLogin(parseCookieHeader(getCookie()));
+  return { logged_in, message: logged_in ? "已登录" : "未登录" };
 }
 
 export async function getRecommendations(
-  limit: number,
-): Promise<{ count: number; data: RecommendItem[] }> {
-  return request(`/recommend?limit=${limit}`);
+  nextUrl?: string | null,
+): Promise<{ count: number; data: RecommendItem[]; next: string | null }> {
+  return withCookie(async (jar) => {
+    requireLogin(jar.cookie);
+    const page = await fetchRecommendations(jar, nextUrl);
+    const data = page.items as unknown as RecommendItem[];
+    return { count: data.length, data, next: page.next };
+  });
 }
 
 export async function getRecommendDetail(
   id: string | number,
   type: string,
+  extra?: { title?: string; author?: string; html?: string },
 ): Promise<RecommendDetail> {
-  const params = new URLSearchParams({ type });
-  return request(`/recommend/${encodeURIComponent(String(id))}?${params.toString()}`);
+  return withCookie(async (jar) => {
+    requireLogin(jar.cookie);
+    const detail = await fetchFullContent(jar, { type, id, ...extra });
+    if (!detail) throw new HttpError(404, "Content not found");
+    return {
+      type: detail.type,
+      id,
+      title: detail.title,
+      author: detail.author,
+      content_length: detail.plain_text.length,
+      segments: detail.segments,
+      content: detail.plain_text,
+      html: detail.html,
+      markdown: detail.markdown,
+      question_detail: detail.question_detail || undefined,
+    };
+  });
 }
 
 export async function getComments(
@@ -132,12 +113,16 @@ export async function getComments(
   offset = "",
   orderBy = "score",
 ): Promise<CommentsResponse> {
-  const params = new URLSearchParams({
-    limit: String(limit),
-    offset,
-    order_by: orderBy,
+  return withCookie(async (jar) => {
+    requireLogin(jar.cookie);
+    const { comments, paging } = await fetchComments(jar, String(answerId), limit, offset, orderBy);
+    return {
+      answer_id: String(answerId),
+      count: comments.length,
+      data: comments,
+      paging,
+    } as unknown as CommentsResponse;
   });
-  return request(`/comments/${encodeURIComponent(String(answerId))}?${params.toString()}`);
 }
 
 export async function getChildComments(
@@ -145,13 +130,29 @@ export async function getChildComments(
   limit = 20,
   offset = "",
 ): Promise<CommentsResponse> {
-  const params = new URLSearchParams({
-    limit: String(limit),
-    offset,
+  return withCookie(async (jar) => {
+    requireLogin(jar.cookie);
+    const { comments, paging } = await fetchChildComments(jar, String(commentId), limit, offset);
+    return {
+      comment_id: String(commentId),
+      count: comments.length,
+      data: comments,
+      paging,
+    } as unknown as CommentsResponse;
   });
-  return request(`/child_comments/${encodeURIComponent(String(commentId))}?${params.toString()}`);
 }
 
 export async function decodeUrl(url: string): Promise<DecodeResponse> {
-  return request<DecodeResponse>("/decode", { method: "POST", body: { url } }, 120000);
+  return withCookie(async (jar) => {
+    const result = await decodeZhihuUrl(url, jar);
+    return {
+      title: result.title,
+      font_count: result.font_count,
+      mapping_size: result.mapping_size,
+      text_length: result.text_length,
+      text: result.text,
+      warnings: result.warnings,
+      cookie_refreshed: result.cookie_refreshed,
+    };
+  });
 }

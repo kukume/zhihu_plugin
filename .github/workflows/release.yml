@@ -28,9 +28,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           NOTES="$(cat <<'EOF'
-          每次推送覆盖构建，请下载 zhihu.vsix 后在 VS Code / Cursor 中「从 VSIX 安装」。
+          下载 zhihu.vsix 后在 VS Code / Cursor 中「从 VSIX 安装」。
 
-          使用前需先部署 https://github.com/kukume/zhihu，并在设置里配置 zhihu.baseUrl。
+          在设置里填写 zhihu.cookie 即可，推荐、评论和盐选解码都在本地完成。
           EOF
           )"
           if gh release view latest >/dev/null 2>&1; then

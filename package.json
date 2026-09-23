@@ -20,26 +20,20 @@
     "configuration": {
       "title": "知乎",
       "properties": {
-        "zhihu.baseUrl": {
-          "type": "string",
-          "description": "kukume/zhihu 后端 API 地址，必须配置"
-        },
         "zhihu.cookie": {
           "type": "string",
           "default": "",
           "editPresentation": "multiline",
-          "description": "知乎 Cookie（从浏览器复制登录后的 Cookie 头，如 z_c0=...; __zse_ck=...）。后端刷新后会自动覆盖"
-        },
-        "zhihu.recommendLimit": {
-          "type": "number",
-          "default": 8,
-          "minimum": 1,
-          "maximum": 20,
-          "description": "推荐列表每次加载条数"
+          "description": "知乎 Cookie（从浏览器复制登录后的 Cookie 头，如 z_c0=...; __zse_ck=...）"
         }
       }
     },
     "commands": [
+      {
+        "command": "zhihu.backRecommend",
+        "title": "返回推荐列表",
+        "icon": "$(arrow-left)"
+      },
       {
         "command": "zhihu.refreshRecommend",
         "title": "刷新推荐",
@@ -79,13 +73,18 @@
     "menus": {
       "view/title": [
         {
+          "command": "zhihu.backRecommend",
+          "when": "view == zhihu.recommend && zhihu.recommendDetail",
+          "group": "navigation@0"
+        },
+        {
           "command": "zhihu.refreshRecommend",
-          "when": "view == zhihu.recommend",
+          "when": "view == zhihu.recommend && !zhihu.recommendDetail",
           "group": "navigation"
         },
         {
           "command": "zhihu.openInEditor",
-          "when": "view == zhihu.recommend",
+          "when": "view == zhihu.recommend && zhihu.recommendDetail",
           "group": "navigation"
         }
       ]
@@ -97,8 +96,17 @@
     "watch": "tsc -watch -p ./",
     "package": "vsce package --out zhihu.vsix"
   },
+  "dependencies": {
+    "jsdom": "^30.1.1",
+    "opentype.js": "^1.3.4",
+    "qrcode": "^1.5.4",
+    "undici": "^8.10.2"
+  },
   "devDependencies": {
+    "@types/jsdom": "^21.1.7",
     "@types/node": "^22.10.0",
+    "@types/opentype.js": "^1.3.8",
+    "@types/qrcode": "^1.5.5",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.6.0",
     "typescript": "^5.7.2"

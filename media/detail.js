@@ -164,15 +164,20 @@
   function captureAnchor(id) {
     if (id == null) return null;
     const el = commentsList.querySelector('[data-cid="' + String(id) + '"]');
+    const main = el ? el.querySelector(".comment-main") || el : null;
+    const rect = main ? main.getBoundingClientRect() : null;
+    const viewHeight = window.innerHeight || document.documentElement.clientHeight;
     return {
       id: String(id),
       top: el ? el.getBoundingClientRect().top : null,
       scrollY: window.scrollY || document.documentElement.scrollTop || 0,
+      onScreen: !!(rect && rect.bottom > 0 && rect.top < viewHeight),
     };
   }
 
   function restoreAnchor(anchor, mode) {
     if (!anchor) return;
+    if (mode === "collapse" && anchor.onScreen) return;
     const apply = () => {
       const el = commentsList.querySelector('[data-cid="' + anchor.id + '"]');
       if (!el) return;
@@ -264,7 +269,7 @@
     return (
       '<div class="comment" data-cid="' +
       escapeHtml(id) +
-      '">' +
+      '"><div class="comment-main">' +
       '<div class="comment-author">' +
       escapeHtml(comment.author || "匿名用户") +
       "</div>" +
@@ -276,7 +281,7 @@
       '<div class="comment-likes">👍 ' +
       escapeHtml(String(comment.like_count || 0)) +
       (comment.dislike_count ? " · 👎 " + escapeHtml(String(comment.dislike_count)) : "") +
-      "</div>" +
+      "</div></div>" +
       childHtml +
       "</div>"
     );

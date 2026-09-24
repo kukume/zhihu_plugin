@@ -6,6 +6,7 @@ import {
   fetchChildComments,
   fetchComments,
   fetchFullContent,
+  fetchQuestionFeeds,
   fetchRecommendations,
   HttpError,
   reportContentOpen,
@@ -15,6 +16,8 @@ import type {
   CommentsResponse,
   DecodeResponse,
   LoginStatus,
+  OtherAnswerItem,
+  OtherAnswersResponse,
   RecommendDetail,
   RecommendItem,
 } from "./types";
@@ -118,6 +121,26 @@ export async function reportRecommendOpen(id: string | number, type: string): Pr
   } catch {
     // Reporting must never block reading.
   }
+}
+
+export async function getQuestionOtherAnswers(
+  questionId: string | number,
+  opts: { excludeAnswerId?: string | number; nextUrl?: string | null } = {},
+): Promise<OtherAnswersResponse> {
+  return withCookie(async (jar) => {
+    requireLogin(jar.cookie);
+    const page = await fetchQuestionFeeds(jar, String(questionId), {
+      excludeAnswerId: opts.excludeAnswerId != null ? String(opts.excludeAnswerId) : undefined,
+      nextUrl: opts.nextUrl,
+    });
+    const data = page.items as unknown as OtherAnswerItem[];
+    return {
+      question_id: String(questionId),
+      count: data.length,
+      data,
+      next: page.next,
+    };
+  });
 }
 
 export async function getComments(

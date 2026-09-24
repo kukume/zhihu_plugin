@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import {
   clearLoginCookie,
   getLoginStatus,
+  getQuestionOtherAnswers,
   getRecommendDetail,
   getRecommendations,
   reportRecommendOpen,
@@ -10,7 +11,12 @@ import {
 import { QrLogin } from "./zhihu/qr-login";
 import { DetailPanel } from "./detailPanel";
 import { getWebviewHtml } from "./html";
-import { isAnswerType, type RecommendDetail, type RecommendItem } from "./types";
+import {
+  isAnswerType,
+  type OtherAnswerItem,
+  type RecommendDetail,
+  type RecommendItem,
+} from "./types";
 
 export class RecommendViewProvider implements vscode.WebviewViewProvider {
   static readonly viewType = "zhihu.recommend";
@@ -21,6 +27,16 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
   private nextUrl: string | null = null;
   private selected?: RecommendItem;
   private detail?: RecommendDetail;
+  private detailStack: Array<{
+    item: RecommendItem;
+    detail: RecommendDetail;
+    otherAnswers: OtherAnswerItem[];
+    otherAnswersNext: string | null;
+    showOtherAnswers: boolean;
+  }> = [];
+  private otherAnswersNext: string | null = null;
+  private otherAnswersCache: OtherAnswerItem[] = [];
+  private showOtherAnswers = false;
   private qr?: QrLogin;
   private qrTimer?: ReturnType<typeof setInterval>;
 
@@ -49,7 +65,31 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
   }
 
   showList(): void {
+    this.detailStack = [];
+    this.otherAnswersNext = null;
+    this.otherAnswersCache = [];
+    this.showOtherAnswers = false;
     this.post({ type: "showList" });
+  }
+
+  /** Back from nested other-answer detail, or to the recommend list. */
+  goBack(): void {
+    const prev = this.detailStack.pop();
+    if (!prev) {
+      this.showList();
+      return;
+    }
+    this.selected = prev.item;
+    this.detail = prev.detail;
+    this.otherAnswersCache = prev.otherAnswers.slice();
+    this.otherAnswersNext = prev.otherAnswersNext;
+    this.showOtherAnswers = prev.showOtherAnswers;
+    // Old page DOM stays mounted; just pop the top layer.
+    this.post({
+      type: "popDetail",
+      hasMore: !!prev.otherAnswersNext,
+      showOtherAnswers: prev.showOtherAnswers,
+    });
   }
 
   openInEditor(): void {
@@ -93,7 +133,14 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
           this.stopQr();
           break;
         case "openItem":
-          await this.openItem(String(msg.id), String(msg.itemType ?? ""));
+          this.detailStack = [];
+          await this.openItem(String(msg.id), String(msg.itemType ?? ""), false);
+          break;
+        case "loadOtherAnswers":
+          await this.loadOtherAnswers(!!msg.append);
+          break;
+        case "openOtherAnswer":
+          await this.openOtherAnswer(String(msg.id ?? ""));
           break;
         case "openInEditor":
           this.openInEditor();
@@ -109,7 +156,7 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.post({ type: "error", message });
+      this.post({ type: "error", message, request: msg.type });
     }
   }
 
@@ -201,28 +248,94 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async openItem(id: string, type: string): Promise<void> {
-    const item = this.items.find((it) => String(it.id) === id && (!type || it.type === type));
-    if (!item) {
+  private async openItem(id: string, type: string, pushCurrent: boolean): Promise<void> {
+    const fromList = this.items.find((it) => String(it.id) === id && (!type || it.type === type));
+    const fromOther = this.otherAnswersCache.find((it) => String(it.id) === id);
+    if (!fromList && !fromOther) {
       throw new Error("未找到该推荐条目");
     }
-    this.selected = item;
+    const recommendItem: RecommendItem = fromList
+      ? { ...fromList }
+      : {
+          type: fromOther!.type || "回答",
+          id: fromOther!.id,
+          question_id: fromOther!.question_id,
+          title: fromOther!.title,
+          author: fromOther!.author,
+          voteup: fromOther!.voteup,
+          comments: fromOther!.comments,
+          excerpt: fromOther!.excerpt,
+          url: fromOther!.url,
+          created_time: fromOther!.created_time,
+        };
+    if (pushCurrent && this.selected && this.detail) {
+      this.detailStack.push({
+        item: this.selected,
+        detail: this.detail,
+        otherAnswers: this.otherAnswersCache.slice(),
+        otherAnswersNext: this.otherAnswersNext,
+        showOtherAnswers: this.showOtherAnswers,
+      });
+    }
+    this.selected = recommendItem;
     this.detail = undefined;
-    this.post({ type: "detailLoading", item });
+    // Nested "other answer" pages should not show another other-answers list.
+    this.showOtherAnswers =
+      !pushCurrent && isAnswerType(recommendItem.type) && recommendItem.question_id != null;
+    this.otherAnswersNext = null;
+    this.otherAnswersCache = [];
+    this.post({ type: "detailLoading", item: recommendItem, push: pushCurrent });
     // Match website: touch first, then read. Do not block detail loading.
-    void reportRecommendOpen(item.id, item.type);
-    const detail = await getRecommendDetail(item.id, item.type, {
-      title: item.title,
-      author: item.author,
-      html: this.articleHtml.get(String(item.id)),
+    void reportRecommendOpen(recommendItem.id, recommendItem.type);
+    const detail = await getRecommendDetail(recommendItem.id, recommendItem.type, {
+      title: recommendItem.title,
+      author: recommendItem.author,
+      html: this.articleHtml.get(String(recommendItem.id)),
     });
     this.detail = detail;
     this.post({
       type: "detailResult",
-      item,
+      item: recommendItem,
       detail,
-      canComment: isAnswerType(item.type),
+      canComment: isAnswerType(recommendItem.type),
+      showOtherAnswers: this.showOtherAnswers,
+      push: pushCurrent,
     });
+  }
+
+  private async loadOtherAnswers(append: boolean): Promise<void> {
+    const item = this.selected;
+    if (!this.showOtherAnswers || !item || !isAnswerType(item.type) || item.question_id == null) {
+      this.post({ type: "otherAnswersResult", data: [], hasMore: false, append: false });
+      return;
+    }
+    if (append && !this.otherAnswersNext) {
+      this.post({ type: "otherAnswersResult", data: [], hasMore: false, append: true });
+      return;
+    }
+    this.post({ type: "otherAnswersLoading", append });
+    const page = await getQuestionOtherAnswers(item.question_id, {
+      excludeAnswerId: item.id,
+      nextUrl: append ? this.otherAnswersNext : null,
+    });
+    this.otherAnswersNext = page.next;
+    this.otherAnswersCache = append ? this.otherAnswersCache.concat(page.data) : page.data.slice();
+    this.post({
+      type: "otherAnswersResult",
+      data: page.data,
+      hasMore: !!page.next,
+      append,
+    });
+  }
+
+  private async openOtherAnswer(id: string): Promise<void> {
+    if (!id) return;
+    if (this.selected && String(this.selected.id) === id) return;
+    const cached = this.otherAnswersCache.find((it) => String(it.id) === id);
+    if (!cached) {
+      throw new Error("未找到该回答");
+    }
+    await this.openItem(id, cached.type || "回答", true);
   }
 }
 

@@ -14,7 +14,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(DecodeViewProvider.viewType, decode, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
-    vscode.commands.registerCommand("zhihu.backRecommend", () => recommend.showList()),
+    vscode.commands.registerCommand("zhihu.backRecommend", () => recommend.goBack()),
     vscode.commands.registerCommand("zhihu.refreshRecommend", () => recommend.refresh()),
     vscode.commands.registerCommand("zhihu.openInEditor", () => recommend.openInEditor()),
   );

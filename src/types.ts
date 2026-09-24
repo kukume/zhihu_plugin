@@ -33,6 +33,26 @@ export interface RecommendDetail {
   question_detail?: string;
 }
 
+export interface OtherAnswerItem {
+  id: string | number;
+  author: string;
+  excerpt: string;
+  voteup: number;
+  comments: number;
+  created_time?: number;
+  title?: string;
+  question_id?: string | number;
+  url?: string;
+  type?: string;
+}
+
+export interface OtherAnswersResponse {
+  question_id: string;
+  count: number;
+  data: OtherAnswerItem[];
+  next: string | null;
+}
+
 export interface CommentItem {
   id: string | number;
   author: string;
@@ -40,6 +60,8 @@ export interface CommentItem {
   images?: string[];
   like_count: number;
   url_token?: string;
+  reply_to_author?: string;
+  reply_comment_id?: string;
   created_time?: number;
   dislike_count?: number;
   ip_location?: string;

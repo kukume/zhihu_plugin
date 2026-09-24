@@ -314,6 +314,9 @@ function parseComment(c: Json) {
       if (href) images.push(href[1]);
     }
   }
+  const replyTo = (c.reply_to_author as Json) ?? null;
+  const replyToName = replyTo?.name ? String(replyTo.name) : "";
+  const replyCommentId = c.reply_comment_id != null ? String(c.reply_comment_id) : "";
   return {
     id: c.id,
     author: String(authorObj.name ?? "匿名用户"),
@@ -321,6 +324,8 @@ function parseComment(c: Json) {
     images,
     like_count: c.vote_count ?? c.like_count ?? 0,
     url_token: String(authorObj.url_token ?? ""),
+    reply_to_author: replyToName || undefined,
+    reply_comment_id: replyCommentId && replyCommentId !== "0" ? replyCommentId : undefined,
     created_time: c.created_time,
     dislike_count: c.dislike_count ?? 0,
     ip_location: ipLocation,
@@ -334,6 +339,78 @@ function parseCommentV5(c: Json) {
   cmt.child_comments = childList.map(parseCommentV5);
   cmt.child_next_offset = c.child_comment_next_offset;
   return cmt;
+}
+
+const QUESTION_FEEDS_INCLUDE =
+  "data[*].excerpt,voteup_count,comment_count,created_time,author.name,question";
+
+function mapQuestionFeedAnswer(card: Json, questionId: string): Json | null {
+  const targetType = String(card.target_type ?? "");
+  const t = (card.target as Json) ?? {};
+  const kind = String(t.type ?? targetType ?? "");
+  if (kind !== "answer") return null;
+  const q = (t.question as Json) ?? {};
+  const author = (t.author as Json) ?? {};
+  const qid = String(q.id ?? questionId);
+  const id = t.id;
+  if (id == null) return null;
+  return {
+    type: contentTypeLabel(t),
+    id,
+    question_id: qid,
+    title: String(q.title ?? ""),
+    author: String(author.name ?? "匿名"),
+    voteup: Number(t.voteup_count ?? 0),
+    comments: Number(t.comment_count ?? 0),
+    excerpt: stripTags(String(t.excerpt ?? "")),
+    url: `https://www.zhihu.com/question/${qid}/answer/${id}`,
+    created_time: t.created_time,
+  };
+}
+
+export async function fetchQuestionFeeds(
+  jar: CookieJar,
+  questionId: string,
+  opts: { excludeAnswerId?: string; nextUrl?: string | null; limit?: number } = {},
+): Promise<{ items: Json[]; next: string | null }> {
+  const limit = opts.limit ?? 3;
+  const exclude = opts.excludeAnswerId != null ? String(opts.excludeAnswerId) : "";
+  let url = opts.nextUrl || "";
+  if (!url) {
+    const first = new URL(`https://www.zhihu.com/api/v4/questions/${questionId}/feeds`);
+    first.searchParams.set("include", QUESTION_FEEDS_INCLUDE);
+    first.searchParams.set("limit", String(limit));
+    first.searchParams.set("offset", "");
+    first.searchParams.set("order", "default");
+    first.searchParams.set("platform", "desktop");
+    first.searchParams.set("ws_qiangzhisafe", "0");
+    url = first.toString();
+  }
+
+  let items: Json[] = [];
+  let next: string | null = null;
+  // If the current answer fills the page, follow next once so UI can still show siblings.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const resp = await zhihuGet(url, jar);
+    if (resp.status === 401) throw new HttpError(401, "登录已失效");
+    if (resp.status !== 200) {
+      throw new HttpError(resp.status, `问题回答列表失败: ${resp.status}`);
+    }
+    const data = zhihuJson(resp.text) ?? {};
+    const paging = (data.paging as Json) ?? {};
+    next = paging.is_end || !paging.next ? null : String(paging.next);
+    const pageItems: Json[] = [];
+    for (const card of (data.data as Json[]) ?? []) {
+      const mapped = mapQuestionFeedAnswer(card, questionId);
+      if (!mapped) continue;
+      if (exclude && String(mapped.id) === exclude) continue;
+      pageItems.push(mapped);
+    }
+    items = items.concat(pageItems);
+    if (items.length > 0 || !next) break;
+    url = next;
+  }
+  return { items, next };
 }
 
 export async function fetchComments(

@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <path
-    fill="currentColor"
-    d="M4.5 3.75h9.75v16.5H4.5V3.75zm1.8 1.8v12.9h6.15V5.55H6.3zm2.1 2.4h2.1v1.35H8.4V7.95zm0 2.7h2.1v6.3H8.4v-6.3zM15.6 7.2l4.65 1.65v8.4L15.6 18.9V7.2zm1.8 2.25v6.45l1.95.7V9.15l-1.95.3z"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+  <!-- Original stylized 知 (矢 + 口), bold enough for 24px activity bar -->
+  <path d="M3.5 3.4h10.2v2.05H12.2L14 10.2h3.2V8.15h2.05V20.6H17.2v-2.2H8.9v2.2H6.85v-5.7H3.7v-2.05h3.15v-3.4H3.5V3.4zm2.6 2.05v2.35h3.7L9 5.45H6.1z"/>
+  <path fill-rule="evenodd" d="M9.55 12.25h7.65v4.15H9.55v-4.15zm1.9 1.85v.5h3.85v-.5H11.45z"/>
 </svg>

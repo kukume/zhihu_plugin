@@ -17,10 +17,16 @@
     paging: null,
     expanded: {},
   };
+  let commentsBusy = false;
+  let commentsLoadFailed = false;
+  let loadingMore = false;
 
   refreshBtn.addEventListener("click", () => {
     state.comments = [];
     state.expanded = {};
+    commentsLoadFailed = false;
+    loadingMore = false;
+    commentsBusy = true;
     post("loadComments", { offset: "", append: false });
   });
 
@@ -29,6 +35,10 @@
     if (!btn) return;
     const id = btn.dataset.commentId;
     const action = btn.dataset.action;
+    if (action === "jump-reply") {
+      jumpToComment(id);
+      return;
+    }
     if (action === "toggle") {
       if (state.expanded[id]) {
         delete state.expanded[id];
@@ -56,13 +66,16 @@
   });
 
   commentsPager.addEventListener("click", (e) => {
-    const btn = e.target.closest("#btn-more-comments");
+    const btn = e.target.closest("#btn-retry-comments");
     if (!btn) return;
     const pg = state.paging;
     if (!pg || pg.is_end || !pg.next_offset) return;
+    commentsLoadFailed = false;
+    loadingMore = true;
+    commentsBusy = true;
     btn.disabled = true;
-    setBusy(btn, true);
     post("loadComments", { offset: pg.next_offset, append: true });
+    renderPager();
   });
 
   window.addEventListener("message", (e) => {
@@ -75,9 +88,13 @@
         state.comments = [];
         state.paging = null;
         state.expanded = {};
+        commentsBusy = false;
+        commentsLoadFailed = false;
+        loadingMore = false;
         renderArticle();
         if (state.canComment) {
           commentsSection.classList.remove("hidden");
+          commentsBusy = true;
           post("loadComments", { offset: "", append: false });
         } else {
           commentsList.innerHTML = '<div class="empty">该类型不支持评论</div>';
@@ -89,11 +106,15 @@
         break;
       case "commentsResult":
         commentsLoading.classList.add("hidden");
+        commentsBusy = false;
+        commentsLoadFailed = false;
+        loadingMore = false;
         state.comments = msg.append
           ? state.comments.concat(msg.data.data || [])
           : msg.data.data || [];
         state.paging = msg.data.paging;
         renderComments();
+        requestAnimationFrame(requestMoreComments);
         break;
       case "childCommentsResult":
         commentsLoading.classList.add("hidden");
@@ -110,10 +131,37 @@
         break;
       case "error":
         commentsLoading.classList.add("hidden");
+        if (msg.request === "loadComments" || (!msg.request && commentsBusy)) {
+          commentsLoadFailed = !!loadingMore;
+          commentsBusy = false;
+          loadingMore = false;
+          renderPager();
+        }
         showToast(msg.message || "出错了");
         break;
     }
   });
+
+  function commentsReachEnd() {
+    if (!state.comments.length) return false;
+    const marker = commentsPager.querySelector(".pagination") || commentsPager || commentsList;
+    if (!marker) return false;
+    const viewBottom = window.innerHeight || document.documentElement.clientHeight;
+    return marker.getBoundingClientRect().bottom <= viewBottom + 24;
+  }
+
+  function requestMoreComments() {
+    if (!state.canComment || commentsBusy || commentsLoadFailed) return;
+    const pg = state.paging;
+    if (!pg || pg.is_end || !pg.next_offset) return;
+    if (!commentsReachEnd()) return;
+    loadingMore = true;
+    commentsBusy = true;
+    post("loadComments", { offset: pg.next_offset, append: true });
+  }
+
+  window.addEventListener("scroll", requestMoreComments, { passive: true });
+  window.addEventListener("resize", requestMoreComments);
 
   function renderArticle() {
     const item = state.item || {};
@@ -192,6 +240,29 @@
     requestAnimationFrame(() => requestAnimationFrame(apply));
   }
 
+  function renderPager() {
+    if (!state.canComment) {
+      commentsPager.innerHTML = "";
+      return;
+    }
+    if (!state.comments.length) {
+      commentsPager.innerHTML = "";
+      return;
+    }
+    const pg = state.paging;
+    const hasMore = pg && !pg.is_end && pg.next_offset;
+    const retry =
+      commentsLoadFailed && hasMore
+        ? '<button id="btn-retry-comments" class="text-btn" type="button">重新加载</button>'
+        : "";
+    commentsPager.innerHTML =
+      '<div class="pagination"><span>已加载 ' +
+      state.comments.length +
+      " 条</span>" +
+      retry +
+      "</div>";
+  }
+
   function renderComments(opts) {
     opts = opts || {};
     const anchor = opts.anchorId != null ? captureAnchor(opts.anchorId) : null;
@@ -203,20 +274,7 @@
     }
     commentsList.innerHTML = state.comments.map(renderComment).join("");
     restoreAnchor(anchor, opts.mode || "keep");
-    const pg = state.paging;
-    const hasMore = pg && !pg.is_end && pg.next_offset;
-    commentsPager.innerHTML =
-      '<div class="pagination"><span>已加载 ' +
-      state.comments.length +
-      " 条</span>" +
-      (hasMore
-        ? iconButton({
-            id: "btn-more-comments",
-            icon: "more",
-            title: "加载更多评论",
-          })
-        : "") +
-      "</div>";
+    renderPager();
   }
 
   function renderComment(comment) {
@@ -287,11 +345,47 @@
     );
   }
 
+  function jumpToComment(id) {
+    if (id == null || id === "") return;
+    const el = commentsList.querySelector('[data-cid="' + String(id) + '"]');
+    if (!el) {
+      showToast("目标评论未加载");
+      return;
+    }
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.remove("comment-highlight");
+    void el.offsetWidth;
+    el.classList.add("comment-highlight");
+    window.clearTimeout(el._highlightTimer);
+    el._highlightTimer = window.setTimeout(() => {
+      el.classList.remove("comment-highlight");
+    }, 1200);
+  }
+
   function renderChild(c) {
+    const id = String(c.id);
+    let replyTo = "";
+    if (c.reply_to_author) {
+      const name = escapeHtml(c.reply_to_author);
+      replyTo = '<span class="comment-reply-to"> 回复 @</span>';
+      if (c.reply_comment_id) {
+        replyTo +=
+          '<span class="comment-reply-name" data-action="jump-reply" data-comment-id="' +
+          escapeHtml(String(c.reply_comment_id)) +
+          '" title="跳转到被回复评论">' +
+          name +
+          "</span>";
+      } else {
+        replyTo += '<span class="comment-reply-name">' + name + "</span>";
+      }
+    }
     return (
-      '<div class="child-comment">' +
+      '<div class="child-comment" data-cid="' +
+      escapeHtml(id) +
+      '">' +
       '<div class="comment-author">' +
       escapeHtml(c.author || "匿名用户") +
+      replyTo +
       "</div>" +
       commentMeta(c) +
       '<div class="comment-content">' +

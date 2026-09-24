@@ -21,7 +21,7 @@ export class DetailPanel {
     }
     const panel = vscode.window.createWebviewPanel(
       "zhihu.detail",
-      detail.title || "知乎详情",
+      "zhihu",
       column,
       {
         enableScripts: true,
@@ -59,7 +59,7 @@ export class DetailPanel {
   private setContent(item: RecommendItem, detail: RecommendDetail): void {
     this.item = item;
     this.detail = detail;
-    this.panel.title = detail.title || item.title || "知乎详情";
+    this.panel.title = "zhihu";
     this.post({
       type: "init",
       item,
@@ -101,7 +101,7 @@ export class DetailPanel {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.post({ type: "error", message });
+      this.post({ type: "error", message, request: msg.type });
     }
   }
 

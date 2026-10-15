@@ -40,17 +40,37 @@ function parseFont(bytes: ArrayBuffer): OtFont {
   return opentype.parse(bytes) as unknown as OtFont;
 }
 
+/** opentype.js accepts TrueType (00 01 00 00), true/typ1, OTTO, and wOFF. */
+function hasFontSignature(buf: ArrayBuffer): boolean {
+  if (buf.byteLength < 12) return false;
+  const u = new Uint8Array(buf, 0, 4);
+  if (u[0] === 0 && u[1] === 1 && u[2] === 0 && u[3] === 0) return true;
+  const tag = String.fromCharCode(u[0], u[1], u[2], u[3]);
+  return tag === "true" || tag === "typ1" || tag === "OTTO" || tag === "wOFF";
+}
+
 async function loadNoto(): Promise<OtFont> {
   if (!notoPromise) {
     notoPromise = (async () => {
       let last = "Noto fetch failed";
       for (const url of [REF_FONT_JSDELIVR, REF_FONT_URL]) {
-        const res = await fetch(url);
-        if (!res.ok) {
-          last = `Noto fetch failed: ${res.status} ${url}`;
-          continue;
+        try {
+          const res = await fetch(url);
+          if (!res.ok) {
+            last = `Noto fetch failed: ${res.status} ${url}`;
+            continue;
+          }
+          const buf = await res.arrayBuffer();
+          // jsDelivr rate-limits this file with HTTP 200 and body "429: Too Many Requests."
+          if (!hasFontSignature(buf)) {
+            const preview = new TextDecoder().decode(buf.slice(0, 48)).replace(/\s+/g, " ").trim();
+            last = `Noto response is not a font: ${preview || "(empty)"}`;
+            continue;
+          }
+          return parseFont(buf);
+        } catch (err) {
+          last = err instanceof Error ? err.message : String(err);
         }
-        return parseFont(await res.arrayBuffer());
       }
       throw new Error(last);
     })();

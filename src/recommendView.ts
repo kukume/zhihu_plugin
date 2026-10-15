@@ -39,8 +39,13 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
   private showOtherAnswers = false;
   private qr?: QrLogin;
   private qrTimer?: ReturnType<typeof setInterval>;
+  private decodeOpener?: (url: string) => void;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  setDecodeOpener(opener: (url: string) => void): void {
+    this.decodeOpener = opener;
+  }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
@@ -152,6 +157,9 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
           if (typeof msg.url === "string") {
             await vscode.env.openExternal(vscode.Uri.parse(msg.url));
           }
+          break;
+        case "openDecode":
+          if (typeof msg.url === "string") this.decodeOpener?.(msg.url);
           break;
       }
     } catch (err) {
@@ -284,7 +292,12 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
       !pushCurrent && isAnswerType(recommendItem.type) && recommendItem.question_id != null;
     this.otherAnswersNext = null;
     this.otherAnswersCache = [];
-    this.post({ type: "detailLoading", item: recommendItem, push: pushCurrent });
+    this.post({
+      type: "detailLoading",
+      item: recommendItem,
+      push: pushCurrent,
+      showOtherAnswers: this.showOtherAnswers,
+    });
     // Match website: touch first, then read. Do not block detail loading.
     void reportRecommendOpen(recommendItem.id, recommendItem.type);
     const detail = await getRecommendDetail(recommendItem.id, recommendItem.type, {

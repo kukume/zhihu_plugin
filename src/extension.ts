@@ -6,6 +6,7 @@ import { RecommendViewProvider } from "./recommendView";
 export function activate(context: vscode.ExtensionContext): void {
   const recommend = new RecommendViewProvider(context);
   const decode = new DecodeViewProvider(context);
+  recommend.setDecodeOpener((url) => decode.openAndDecode(url));
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(RecommendViewProvider.viewType, recommend, {

@@ -182,6 +182,15 @@
     ),
     more: strokeIcon('<polyline points="6 9 12 15 18 9"/>'),
     collapse: strokeIcon('<polyline points="18 15 12 9 6 15"/>'),
+    answers: strokeIcon(
+      '<path d="M4 6h10"/><path d="M4 11h10"/><path d="M4 16h6"/><polyline points="16 13 19 16 22 13"/>',
+    ),
+    answersHide: strokeIcon(
+      '<path d="M4 6h10"/><path d="M4 11h10"/><path d="M4 16h6"/><polyline points="16 16 19 13 22 16"/>',
+    ),
+    decipher: strokeIcon(
+      '<circle cx="7.5" cy="15" r="3.5"/><path d="M11 15H20"/><path d="M16 15v3"/><path d="M18.5 15v2.5"/>',
+    ),
     decode: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>',
     link: strokeIcon(
       '<path d="M18 13v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',

@@ -6,11 +6,23 @@ export class DecodeViewProvider implements vscode.WebviewViewProvider {
   static readonly viewType = "zhihu.decode";
 
   private view?: vscode.WebviewView;
+  private ready = false;
+  private pendingUrl?: string;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
+  /** Show the Decode view and start decoding this Zhihu URL. */
+  openAndDecode(url: string): void {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    this.pendingUrl = trimmed;
+    void vscode.commands.executeCommand("zhihu.decode.focus");
+    this.flushPending();
+  }
+
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
+    this.ready = false;
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media")],
@@ -31,7 +43,19 @@ export class DecodeViewProvider implements vscode.WebviewViewProvider {
     void this.view?.webview.postMessage(message);
   }
 
+  private flushPending(): void {
+    if (!this.ready || !this.view || !this.pendingUrl) return;
+    const url = this.pendingUrl;
+    this.pendingUrl = undefined;
+    this.post({ type: "startDecode", url });
+  }
+
   private async handleMessage(msg: { type: string; url?: string }): Promise<void> {
+    if (msg.type === "ready") {
+      this.ready = true;
+      this.flushPending();
+      return;
+    }
     if (msg.type !== "decode") {
       return;
     }

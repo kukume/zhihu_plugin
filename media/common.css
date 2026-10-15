@@ -386,12 +386,17 @@ input[type="text"]:focus { border-color: var(--vscode-focusBorder); }
   margin-top: 0;
 }
 
+.other-answers-section {
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--vscode-panel-border);
+}
 .other-answers-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin: 16px 0 8px;
+  margin: 0 0 4px;
 }
+.other-answers-header .text-btn { margin-top: 0; }
 .other-answers-header h3 { font-size: 15px; }
 .other-answer-meta {
   font-size: 11px;

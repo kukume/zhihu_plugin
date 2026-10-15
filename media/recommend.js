@@ -14,6 +14,19 @@
   let otherBusy = false;
   let otherFailed = false;
   let otherLoadingMore = false;
+  let otherOpen = false;
+
+  function openDecode(target) {
+    const btn = target.closest(".btn-open-decode");
+    if (!btn) return false;
+    const url = btn.getAttribute("data-decode-url") || "";
+    if (!url) {
+      showToast("没有可解码的链接");
+      return true;
+    }
+    post("openDecode", { url });
+    return true;
+  }
 
   listEl.addEventListener("click", (e) => {
     if (e.target.closest("#btn-qr")) {
@@ -57,14 +70,14 @@
         showDetail();
         {
           const layer = msg.push ? pushDetailLayer() : replaceDetailLayer();
-          layer.innerHTML = renderDetailShell(msg.item, true);
+          layer.innerHTML = renderDetailShell(msg.item, true, null, msg.showOtherAnswers);
           layer.scrollTop = 0;
         }
         break;
       case "detailResult":
         {
           const layer = topDetailLayer() || replaceDetailLayer();
-          layer.innerHTML = renderDetailShell(msg.item, false, msg.detail);
+          layer.innerHTML = renderDetailShell(msg.item, false, msg.detail, msg.showOtherAnswers);
           bindQuestionToggle(layer);
           bindOtherAnswers(layer, msg.item, msg.showOtherAnswers);
           layer.scrollTop = 0;
@@ -75,7 +88,13 @@
         otherBusy = false;
         otherFailed = false;
         otherLoadingMore = false;
-        otherHasMore = !!msg.hasMore && msg.showOtherAnswers !== false;
+        {
+          const layer = topDetailLayer();
+          const body = layer && layer.querySelector(".other-answers-body");
+          otherOpen = !!(body && !body.classList.contains("hidden"));
+          otherHasMore = !!msg.hasMore && msg.showOtherAnswers !== false;
+          setOtherToggleLabel(layer);
+        }
         renderOtherAnswersPager();
         requestAnimationFrame(requestMoreOtherAnswers);
         break;
@@ -224,7 +243,7 @@
       .join("");
   }
 
-  function renderDetailShell(item, loading, detail) {
+  function renderDetailShell(item, loading, detail, showOtherAnswers) {
     const title = (detail && detail.title) || titleOf(item || {});
     const author = (detail && detail.author) || (item && item.author) || "匿名";
     const type = (detail && detail.type) || (item && item.type) || "";
@@ -247,12 +266,30 @@
     const metaParts = [escapeHtml(author), escapeHtml(type)];
     if (item && item.created_time) metaParts.push(formatTime(item.created_time));
     const linkBtn = url ? iconButton({ icon: "link", title: "打开原链接", url }) : "";
+    const decodeBtn =
+      type === "盐选小说" && url
+        ? iconButton({
+            icon: "decipher",
+            title: "解码",
+            className: "btn-open-decode",
+            attrs: 'data-decode-url="' + escapeHtml(url) + '"',
+          })
+        : "";
+    const otherBtn = iconButton({
+      icon: "answers",
+      title: "其他回答",
+      className: "btn-toggle-other-answers",
+    });
     const otherSection =
       '<section class="other-answers-section hidden">' +
-      '<div class="other-answers-header"><h3>其他回答</h3></div>' +
+      '<div class="other-answers-header">' +
+      otherBtn +
+      "</div>" +
+      '<div class="other-answers-body hidden">' +
       '<div class="other-answers-list"></div>' +
       '<div class="other-answers-pager"></div>' +
       '<div class="other-answers-loading loading hidden">加载其他回答...</div>' +
+      "</div>" +
       "</section>";
     return (
       '<article class="article"><h2>' +
@@ -262,6 +299,7 @@
       metaParts.join(" · ") +
       "</span>" +
       linkBtn +
+      decodeBtn +
       "</div>" +
       question +
       body +
@@ -287,6 +325,12 @@
     return type === "回答" || type === "盐选小说" || type === "answer";
   }
 
+  function setOtherToggleLabel(layer) {
+    const btn = layer && layer.querySelector(".btn-toggle-other-answers");
+    if (!btn) return;
+    setIcon(btn, otherOpen ? "answersHide" : "answers", otherOpen ? "收起其他回答" : "其他回答");
+  }
+
   function bindOtherAnswers(layer, item, showOtherAnswers) {
     const section = layer.querySelector(".other-answers-section");
     if (!section) return;
@@ -295,17 +339,41 @@
     otherBusy = false;
     otherFailed = false;
     otherLoadingMore = false;
+    otherOpen = false;
+    const toggle = layer.querySelector(".btn-toggle-other-answers");
     if (!enabled) {
       section.classList.add("hidden");
+      if (toggle) toggle.classList.add("hidden");
       return;
     }
+    if (toggle) toggle.classList.remove("hidden");
     section.classList.remove("hidden");
+    const body = section.querySelector(".other-answers-body");
     const list = section.querySelector(".other-answers-list");
     const pager = section.querySelector(".other-answers-pager");
+    if (body) body.classList.add("hidden");
     if (list) list.innerHTML = "";
     if (pager) pager.innerHTML = "";
-    otherBusy = true;
-    post("loadOtherAnswers", { append: false });
+    setOtherToggleLabel(layer);
+  }
+
+  function toggleOtherAnswers() {
+    const layer = topDetailLayer();
+    const body = layer && layer.querySelector(".other-answers-body");
+    if (!layer || !body) return;
+    otherOpen = !otherOpen;
+    body.classList.toggle("hidden", !otherOpen);
+    setOtherToggleLabel(layer);
+    if (!otherOpen) return;
+    const list = layer.querySelector(".other-answers-list");
+    if ((!list || !list.childElementCount) && !otherBusy) {
+      otherBusy = true;
+      otherFailed = false;
+      otherLoadingMore = false;
+      post("loadOtherAnswers", { append: false });
+      return;
+    }
+    requestAnimationFrame(requestMoreOtherAnswers);
   }
 
   function setOtherAnswersLoading(on) {
@@ -317,10 +385,10 @@
   }
 
   function otherAnswersReachEnd(layer) {
-    if (!layer) return false;
-    const section = layer.querySelector(".other-answers-section");
-    if (!section || section.classList.contains("hidden")) return false;
-    const marker = section.querySelector(".other-answers-pager") || section;
+    if (!layer || !otherOpen) return false;
+    const body = layer.querySelector(".other-answers-body");
+    if (!body || body.classList.contains("hidden")) return false;
+    const marker = layer.querySelector(".other-answers-pager") || body;
     return marker.getBoundingClientRect().bottom <= layer.getBoundingClientRect().bottom + 24;
   }
 
@@ -351,7 +419,10 @@
     const list = layer.querySelector(".other-answers-list");
     const pager = layer.querySelector(".other-answers-pager");
     if (!section || !list || !pager) return;
-    section.classList.remove("hidden");
+    if (otherOpen) {
+      const body = section.querySelector(".other-answers-body");
+      if (body) body.classList.remove("hidden");
+    }
     const html = (items || [])
       .map((item) => {
         const meta = [
@@ -378,6 +449,11 @@
   }
 
   detailEl.addEventListener("click", (e) => {
+    if (openDecode(e.target)) return;
+    if (e.target.closest(".btn-toggle-other-answers")) {
+      toggleOtherAnswers();
+      return;
+    }
     const retry = e.target.closest(".btn-retry-other-answers");
     if (retry) {
       retry.disabled = true;

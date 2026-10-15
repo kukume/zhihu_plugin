@@ -22,6 +22,11 @@
 
   window.addEventListener("message", (e) => {
     const msg = e.data || {};
+    if (msg.type === "startDecode") {
+      urlInput.value = msg.url || "";
+      decode();
+      return;
+    }
     if (msg.type === "decodeLoading") {
       loading.classList.toggle("hidden", !msg.loading);
       window.Zhihu.setBusy(btn, !!msg.loading);
@@ -51,4 +56,6 @@
       escapeHtml(String(data.mapping_size ?? 0)) +
       "</div>";
   }
+
+  post("ready");
 })();

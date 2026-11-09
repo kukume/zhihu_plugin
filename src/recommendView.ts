@@ -8,7 +8,7 @@ import {
   reportRecommendOpen,
   saveLoginCookie,
 } from "./api";
-import { QrLogin } from "./zhihu/qr-login";
+import { QrLogin, type QrPoll } from "./zhihu/qr-login";
 import { DetailPanel } from "./detailPanel";
 import { getWebviewHtml } from "./html";
 import {
@@ -67,6 +67,11 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
 
   refresh(): void {
     void this.loadList(true);
+  }
+
+  /** Page size changed: the next load picks it up, so just tell the user. */
+  notifyPageSizeChanged(): void {
+    this.post({ type: "toast", message: "每页条数已更新，下次加载生效" });
   }
 
   showList(): void {
@@ -161,6 +166,9 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
         case "openDecode":
           if (typeof msg.url === "string") this.decodeOpener?.(msg.url);
           break;
+        case "webviewError":
+          console.error("[zhihu] webview error:", msg.message);
+          break;
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -187,11 +195,21 @@ export class RecommendViewProvider implements vscode.WebviewViewProvider {
   private async pollQr(): Promise<void> {
     const qr = this.qr;
     if (!qr) return;
-    const result = await qr.poll();
+    let result: QrPoll;
+    try {
+      result = await qr.poll();
+    } catch (err) {
+      if (this.qr !== qr) return;
+      this.stopQr();
+      const message = err instanceof Error ? err.message : String(err);
+      this.post({ type: "qrStatus", message: `扫码登录失败：${message}`, failed: true });
+      return;
+    }
     if (this.qr !== qr) return;
     if (result.phase === "success") {
       this.stopQr();
       await saveLoginCookie(result.cookie);
+      this.post({ type: "toast", message: "登录成功" });
       await this.loadList(true);
       return;
     }

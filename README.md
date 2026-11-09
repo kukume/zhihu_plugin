@@ -1,17 +1,24 @@
-# 知乎 VS Code / Cursor 插件
+# 知乎 VS Code 插件
 
-侧栏浏览知乎推荐、解码盐选。
+浏览知乎推荐、解码盐选。无需浏览器。
 
-## 1. 配置
+## 环境要求
 
-安装插件后，打开设置，搜索 **知乎**，填写：
+VS Code **1.123.0** 或更高版本。
 
-| 配置项 | 说明 |
-| --- | --- |
-| `zhihu.cookie` | 知乎 Cookie（从浏览器复制登录后的 Cookie 头，需包含 `z_c0`）。 |
+## 登录
 
+打开侧栏的 **知乎** 图标，未登录时点 **扫码登录**，用知乎 App 扫一扫并在手机上确认即可。
 
-## 2. 安装插件
+也可以手动粘贴 Cookie：在设置里填写 `zhihu.cookie`，扩展会把它导入加密存储并自动清空该设置项。
+
+## 安装插件
+
+**方式一：扩展市场（推荐）**
+
+在 VS Code / Cursor 的扩展视图搜索 **zhihu**，或直接打开 [Marketplace 页面](https://marketplace.visualstudio.com/items?itemName=kukume.zhihu) 点击 Install。
+
+**方式二：从 VSIX 安装**
 
 1. 打开本仓库的 [Releases](https://github.com/kukume/zhihu_plugin/releases/latest)，下载 `zhihu.vsix`。
 2. 在 VS Code / Cursor 中：扩展视图 → `...` → **Install from VSIX...**（从 VSIX 安装），选刚下载的文件。
@@ -22,8 +29,6 @@
 code --install-extension zhihu.vsix
 ```
 
-Cursor 同理，把 `code` 换成 `cursor`。
-
 ## 本地开发
 
 ```bash
@@ -31,10 +36,14 @@ npm install
 npm run compile
 ```
 
-用 VS Code / Cursor 打开本目录，按 `F5` 启动扩展开发宿主。
+用 VS Code 打开本目录，按 `F5` 启动扩展开发宿主。
 
 本地打包：
 
 ```bash
 npm run package
 ```
+
+## 许可证
+
+[GNU General Public License v3.0](LICENSE)

@@ -35,6 +35,39 @@ type OtFont = {
 };
 
 let notoPromise: Promise<OtFont> | undefined;
+let notoCacheDir: string | undefined;
+
+/** Point the reference-font cache at the extension's global storage. */
+export function setNotoCacheDir(dir: string): void {
+  notoCacheDir = dir;
+}
+
+const NOTO_CACHE_FILE = "NotoSansCJKsc-Regular.otf";
+
+async function readCachedNoto(): Promise<ArrayBuffer | null> {
+  if (!notoCacheDir) return null;
+  try {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const buf = await fs.readFile(path.join(notoCacheDir, NOTO_CACHE_FILE));
+    const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    return hasFontSignature(bytes) ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCachedNoto(bytes: ArrayBuffer): Promise<void> {
+  if (!notoCacheDir) return;
+  try {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    await fs.mkdir(notoCacheDir, { recursive: true });
+    await fs.writeFile(path.join(notoCacheDir, NOTO_CACHE_FILE), Buffer.from(bytes));
+  } catch {
+    // Cache is best-effort; decoding still works without it.
+  }
+}
 
 function parseFont(bytes: ArrayBuffer): OtFont {
   return opentype.parse(bytes) as unknown as OtFont;
@@ -52,6 +85,9 @@ function hasFontSignature(buf: ArrayBuffer): boolean {
 async function loadNoto(): Promise<OtFont> {
   if (!notoPromise) {
     notoPromise = (async () => {
+      const cached = await readCachedNoto();
+      if (cached) return parseFont(cached);
+
       let last = "Noto fetch failed";
       for (const url of [REF_FONT_JSDELIVR, REF_FONT_URL]) {
         try {
@@ -67,6 +103,7 @@ async function loadNoto(): Promise<OtFont> {
             last = `Noto response is not a font: ${preview || "(empty)"}`;
             continue;
           }
+          await writeCachedNoto(buf);
           return parseFont(buf);
         } catch (err) {
           last = err instanceof Error ? err.message : String(err);

@@ -1,4 +1,11 @@
-import { parseCookieHeader, toCookieHeader, UA } from "./cookies";
+import {
+  parseCookieHeader,
+  SEC_CH_UA,
+  SEC_CH_UA_MOBILE,
+  SEC_CH_UA_PLATFORM,
+  toCookieHeader,
+  UA,
+} from "./cookies";
 import { generateZseCk, isZseCkChallenge } from "./zse-ck";
 
 export type CookieJar = { cookie: string };
@@ -30,6 +37,26 @@ function asTimeout(err: unknown): never {
   throw err;
 }
 
+let warnedNoSetCookie = false;
+
+/**
+ * Node < 19.7 has no Headers.getSetCookie, and the fallback `get("set-cookie")`
+ * joins multiple cookies with ", " which is ambiguous. Warn once instead of
+ * silently never refreshing cookies.
+ */
+function readSetCookie(headers: Headers): string[] {
+  if (typeof headers.getSetCookie === "function") return headers.getSetCookie();
+  if (!warnedNoSetCookie) {
+    warnedNoSetCookie = true;
+    console.warn(
+      "[zhihu] 当前运行时不支持 Headers.getSetCookie，Cookie 自动刷新已禁用；请升级 VS Code / Cursor。",
+    );
+  }
+  return [];
+}
+
+export { readSetCookie };
+
 type RawFetchInit = {
   accept: string;
   redirect: RequestRedirect;
@@ -52,9 +79,9 @@ async function rawFetch(
     "Accept-Encoding": "identity",
   };
   if (init.navigate) {
-    headers["sec-ch-ua"] = '"Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"';
-    headers["sec-ch-ua-mobile"] = "?0";
-    headers["sec-ch-ua-platform"] = '"Windows"';
+    headers["sec-ch-ua"] = SEC_CH_UA;
+    headers["sec-ch-ua-mobile"] = SEC_CH_UA_MOBILE;
+    headers["sec-ch-ua-platform"] = SEC_CH_UA_PLATFORM;
     headers["Upgrade-Insecure-Requests"] = "1";
     headers["sec-fetch-site"] = "same-origin";
     headers["sec-fetch-mode"] = "navigate";
@@ -85,7 +112,7 @@ async function rawFetch(
     asTimeout(err);
   }
   const text = await res.text();
-  const setCookie = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+  const setCookie = readSetCookie(res.headers);
   return {
     status: res.status,
     text,

@@ -54,7 +54,6 @@ export async function resolvePaidColumnForAnswer(jar: CookieJar, url: string): P
       keys: paidContent ? Object.keys(paidContent) : [],
     });
   }
-  console.log(`paid-column answer=${target.id} kmqa=${paidUrl}`);
   return {
     paidUrl,
     answerId: target.id,

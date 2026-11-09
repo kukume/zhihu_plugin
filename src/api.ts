@@ -1,4 +1,11 @@
-import * as vscode from "vscode";
+import { getCookie, setCookie } from "./cookieStore";
+import {
+  OTHER_ANSWERS_PAGE_UNIT,
+  otherAnswersPageSize,
+  RECOMMEND_PAGE_UNIT,
+  recommendPageSize,
+  requestCount,
+} from "./settings";
 import { cookiesDiffer, hasLogin, parseCookieHeader } from "./zhihu/cookies";
 import { decodeZhihuUrl } from "./zhihu/decode";
 import type { CookieJar } from "./zhihu/http";
@@ -22,40 +29,25 @@ import type {
   RecommendItem,
 } from "./types";
 
-function getConfig() {
-  return vscode.workspace.getConfiguration("zhihu");
-}
-
-function getCookie(): string {
-  return (getConfig().get<string>("cookie") ?? "").trim();
-}
-
-function cookieConfigTarget(): vscode.ConfigurationTarget {
-  const inspect = getConfig().inspect<string>("cookie");
-  if (inspect?.workspaceFolderValue !== undefined) {
-    return vscode.ConfigurationTarget.WorkspaceFolder;
-  }
-  if (inspect?.workspaceValue !== undefined) {
-    return vscode.ConfigurationTarget.Workspace;
-  }
-  return vscode.ConfigurationTarget.Global;
-}
-
-async function persistCookie(cookie: string): Promise<void> {
-  await getConfig().update("cookie", cookie, cookieConfigTarget());
-}
-
-export async function saveLoginCookie(cookie: string): Promise<void> {
-  await persistCookie(cookie);
-}
-
-export async function clearLoginCookie(): Promise<void> {
-  await persistCookie("");
-}
-
 function rethrow(err: unknown): never {
   if (err instanceof HttpError) throw new Error(err.message);
   throw err;
+}
+
+/** Keep cookies the user already had (e.g. hand-pasted ones) and overlay the new ones. */
+function mergeCookie(existing: string, incoming: string): string {
+  const merged = new Map<string, string>();
+  for (const pair of parseCookieHeader(existing)) merged.set(pair.name, pair.value);
+  for (const pair of parseCookieHeader(incoming)) merged.set(pair.name, pair.value);
+  return [...merged].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
+export async function saveLoginCookie(cookie: string): Promise<void> {
+  await setCookie(mergeCookie(getCookie(), cookie));
+}
+
+export async function clearLoginCookie(): Promise<void> {
+  await setCookie("");
 }
 
 async function withCookie<T>(fn: (jar: CookieJar) => Promise<T>): Promise<T> {
@@ -63,10 +55,10 @@ async function withCookie<T>(fn: (jar: CookieJar) => Promise<T>): Promise<T> {
   const jar: CookieJar = { cookie: before };
   try {
     const result = await fn(jar);
-    if (cookiesDiffer(before, jar.cookie)) await persistCookie(jar.cookie);
+    if (cookiesDiffer(before, jar.cookie)) await setCookie(jar.cookie);
     return result;
   } catch (err) {
-    if (cookiesDiffer(before, jar.cookie)) await persistCookie(jar.cookie);
+    if (cookiesDiffer(before, jar.cookie)) await setCookie(jar.cookie);
     rethrow(err);
   }
 }
@@ -81,7 +73,10 @@ export async function getRecommendations(
 ): Promise<{ count: number; data: RecommendItem[]; next: string | null }> {
   return withCookie(async (jar) => {
     requireLogin(jar.cookie);
-    const page = await fetchRecommendations(jar, nextUrl);
+    const pageSize = recommendPageSize();
+    const page = await fetchRecommendations(jar, nextUrl, {
+      pages: requestCount(pageSize, RECOMMEND_PAGE_UNIT),
+    });
     const data = page.items as unknown as RecommendItem[];
     return { count: data.length, data, next: page.next };
   });
@@ -129,9 +124,11 @@ export async function getQuestionOtherAnswers(
 ): Promise<OtherAnswersResponse> {
   return withCookie(async (jar) => {
     requireLogin(jar.cookie);
+    const pageSize = otherAnswersPageSize();
     const page = await fetchQuestionFeeds(jar, String(questionId), {
       excludeAnswerId: opts.excludeAnswerId != null ? String(opts.excludeAnswerId) : undefined,
       nextUrl: opts.nextUrl,
+      limit: pageSize,
     });
     const data = page.items as unknown as OtherAnswerItem[];
     return {

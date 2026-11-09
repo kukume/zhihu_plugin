@@ -164,6 +164,23 @@
     vscode.postMessage(Object.assign({ type }, extra || {}));
   }
 
+  /** Surface uncaught webview errors instead of leaving a blank pane. */
+  function installErrorHandlers() {
+    window.addEventListener("error", (e) => {
+      const message = (e && e.message) || "脚本错误";
+      showToast("出错了：" + message);
+      post("webviewError", { message: String(message) });
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      const reason = e && e.reason;
+      const message = (reason && (reason.message || String(reason))) || "未知错误";
+      showToast("出错了：" + message);
+      post("webviewError", { message: String(message) });
+    });
+  }
+
+  installErrorHandlers();
+
   function strokeIcon(inner) {
     return (
       '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +

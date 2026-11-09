@@ -117,6 +117,9 @@
       case "qrStatus":
         setQrMessage(msg.message, !!msg.failed);
         break;
+      case "toast":
+        showToast(msg.message || "");
+        break;
       case "error":
         loading = false;
         listLoading.classList.add("hidden");

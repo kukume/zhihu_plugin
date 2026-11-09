@@ -1,4 +1,4 @@
-import { cookieFromRequest, hasLogin, parseCookieHeader } from "./cookies";
+import { hasLogin, parseCookieHeader } from "./cookies";
 import { extractArticleHtml, extractTitle, htmlToMarkdown, htmlToPlain, htmlToSegments } from "./html";
 import type { CookieJar } from "./http";
 import { zhihuMultipartPost, zhihuRequest } from "./http";
@@ -112,20 +112,30 @@ function isRecommendAd(item: Json): boolean {
   return false;
 }
 
-export async function fetchRecommendations(jar: CookieJar, startUrl?: string | null) {
-  const pageUrl = startUrl || recommendFirstPage();
-  const resp = await zhihuGet(pageUrl, jar);
-  if (resp.status === 401) throw new HttpError(401, "登录已失效");
-  if (resp.status !== 200) {
-    throw new HttpError(resp.status, `推荐接口失败: ${resp.status}`);
-  }
-  const data = zhihuJson(resp.text);
-  if (!data) {
-    throw new HttpError(resp.status, `推荐接口失败: ${resp.status}`);
-  }
+export async function fetchRecommendations(
+  jar: CookieJar,
+  startUrl?: string | null,
+  opts: { pages?: number } = {},
+) {
+  const pages = Math.max(1, Math.floor(opts.pages ?? 1));
   const all: Json[] = [];
-  const items = (data.data as Json[]) ?? [];
-  for (const item of items) {
+  let pageUrl = startUrl || recommendFirstPage();
+  let next: string | null = null;
+
+  // The recommend endpoint ignores `limit` and always returns 6 items, so a
+  // larger UI page is filled by following `paging.next` several times.
+  for (let page = 0; page < pages; page++) {
+    const resp = await zhihuGet(pageUrl, jar);
+    if (resp.status === 401) throw new HttpError(401, "登录已失效");
+    if (resp.status !== 200) {
+      throw new HttpError(resp.status, `推荐接口失败: ${resp.status}`);
+    }
+    const data = zhihuJson(resp.text);
+    if (!data) {
+      throw new HttpError(resp.status, `推荐接口失败: ${resp.status}`);
+    }
+    const items = (data.data as Json[]) ?? [];
+    for (const item of items) {
       if (isRecommendAd(item)) continue;
       const t = (item.target as Json) ?? {};
       const kind = String(t.type ?? "");
@@ -171,12 +181,18 @@ export async function fetchRecommendations(jar: CookieJar, startUrl?: string | n
         continue;
       }
       all.push(entry);
+    }
+
+    const paging = (data.paging as Json) ?? {};
+    const following = String(paging.next ?? "");
+    // Use the raw page size for end detection so an all-ad page doesn't stop pagination.
+    const isEnd = Boolean(paging.is_end) || !following || items.length === 0;
+    next = isEnd ? null : following;
+    if (!next) break;
+    pageUrl = next;
   }
-  const paging = (data.paging as Json) ?? {};
-  const following = String(paging.next ?? "");
-  // Use the raw page size for end detection so an all-ad page doesn't stop pagination.
-  const isEnd = Boolean(paging.is_end) || !following || items.length === 0;
-  return { items: all, next: isEnd ? null : following };
+
+  return { items: all, next };
 }
 
 function isAnswerType(type: string): boolean {
@@ -389,8 +405,9 @@ export async function fetchQuestionFeeds(
 
   let items: Json[] = [];
   let next: string | null = null;
-  // If the current answer fills the page, follow next once so UI can still show siblings.
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // Keep following `next` until the page is filled or the feed ends. The first
+  // page can come back empty when it only contains the answer being read.
+  for (let attempt = 0; attempt < 5; attempt++) {
     const resp = await zhihuGet(url, jar);
     if (resp.status === 401) throw new HttpError(401, "登录已失效");
     if (resp.status !== 200) {
@@ -399,15 +416,13 @@ export async function fetchQuestionFeeds(
     const data = zhihuJson(resp.text) ?? {};
     const paging = (data.paging as Json) ?? {};
     next = paging.is_end || !paging.next ? null : String(paging.next);
-    const pageItems: Json[] = [];
     for (const card of (data.data as Json[]) ?? []) {
       const mapped = mapQuestionFeedAnswer(card, questionId);
       if (!mapped) continue;
       if (exclude && String(mapped.id) === exclude) continue;
-      pageItems.push(mapped);
+      items.push(mapped);
     }
-    items = items.concat(pageItems);
-    if (items.length > 0 || !next) break;
+    if (items.length >= limit || !next) break;
     url = next;
   }
   return { items, next };
@@ -473,8 +488,3 @@ export async function fetchChildComments(
   };
 }
 
-export function getCookieOrThrow(request: Request): string {
-  const cookie = cookieFromRequest(request);
-  requireLogin(cookie);
-  return cookie;
-}

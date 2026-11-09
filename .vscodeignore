@@ -5,4 +5,4 @@ src/**
 tsconfig.json
 **/*.map
 .github/**
-!media/**
+_*

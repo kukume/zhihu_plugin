@@ -1,8 +1,8 @@
 import QRCode from "qrcode";
-import { UA } from "./cookies";
+import { SEC_CH_UA, SEC_CH_UA_MOBILE, SEC_CH_UA_PLATFORM, UA } from "./cookies";
 import { nativeFetch } from "./native-fetch";
 import type { CookieJar } from "./http";
-import { upsertCookie } from "./http";
+import { readSetCookie, upsertCookie } from "./http";
 import { generateZseCk, isZseCkChallenge } from "./zse-ck";
 
 const SIGNIN = "https://www.zhihu.com/signin?next=%2F";
@@ -18,6 +18,29 @@ type CreatedQr = {
   expiresAt: number;
 };
 
+type ScanInfo = {
+  status?: number;
+  login_status?: string;
+  cookie?: string;
+  cookies?: string;
+  z_c0?: string;
+  user_id?: unknown;
+  access_token?: string;
+  success?: boolean;
+  logged_in?: boolean;
+  error?: { code?: number; message?: string; need_login?: boolean; redirect?: string };
+};
+
+const COOKIE_ATTRIBUTES = new Set([
+  "path",
+  "domain",
+  "expires",
+  "max-age",
+  "httponly",
+  "secure",
+  "samesite",
+]);
+
 function cookieValue(jar: CookieJar, name: string): string {
   const match = jar.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
   return match?.[1] ?? "";
@@ -31,6 +54,21 @@ function absorbSetCookie(jar: CookieJar, setCookie: string[]): void {
   }
 }
 
+/** scan_info returns the login cookie in the body, not as Set-Cookie. */
+function absorbCookieHeader(jar: CookieJar, header: string | undefined): void {
+  if (!header) return;
+  for (const part of header.split(";")) {
+    const item = part.trim();
+    const eq = item.indexOf("=");
+    if (eq <= 0) continue;
+    const name = item.slice(0, eq).trim();
+    const value = item.slice(eq + 1).trim();
+    if (!name || COOKIE_ATTRIBUTES.has(name.toLowerCase())) continue;
+    if (!value || value === '""') continue;
+    jar.cookie = upsertCookie(jar.cookie, name, value);
+  }
+}
+
 async function request(
   jar: CookieJar,
   url: string,
@@ -41,9 +79,9 @@ async function request(
     Accept: "*/*",
     "Accept-Language": "zh-CN,zh;q=0.9",
     Referer: SIGNIN,
-    "sec-ch-ua": '"Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Windows"',
+    "sec-ch-ua": SEC_CH_UA,
+    "sec-ch-ua-mobile": SEC_CH_UA_MOBILE,
+    "sec-ch-ua-platform": SEC_CH_UA_PLATFORM,
   };
   if (!init.api && (init.method ?? "GET") === "GET") {
     headers.Accept = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
@@ -66,7 +104,7 @@ async function request(
     signal: AbortSignal.timeout(20000),
   });
   const text = await res.text();
-  const setCookie = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+  const setCookie = readSetCookie(res.headers);
   absorbSetCookie(jar, setCookie);
   if (isZseCkChallenge(res.status, text)) {
     if (init.challenged) throw new Error("知乎安全验证未通过");
@@ -120,11 +158,45 @@ export class QrLogin {
     const url = `https://www.zhihu.com/api/v3/account/api/login/qrcode/${encodeURIComponent(this.created.token)}/scan_info`;
     const res = await request(this.jar, url, { api: true });
     if (res.status !== 200) return { phase: "done", message: `查询扫码状态失败: ${res.status}` };
-    const data = JSON.parse(res.text) as { status?: number; user_id?: unknown; uid?: unknown };
-    if (cookieValue(this.jar, "z_c0") || data.user_id || data.uid) {
+
+    let data: ScanInfo;
+    try {
+      data = JSON.parse(res.text) as ScanInfo;
+    } catch {
+      return { phase: "done", message: "扫码状态返回异常" };
+    }
+
+    if (data.error) {
+      const message = data.error.message || "知乎拒绝了本次登录";
+      return { phase: "done", message };
+    }
+
+    // The confirmed response carries the login cookie in the body.
+    absorbCookieHeader(this.jar, data.cookie);
+    absorbCookieHeader(this.jar, data.cookies);
+    if (data.z_c0) this.jar.cookie = upsertCookie(this.jar.cookie, "z_c0", data.z_c0);
+
+    const loginStatus = (data.login_status ?? "").toUpperCase();
+    if (loginStatus === "EXPIRED" || (loginStatus === "" && data.status === 5)) {
+      return { phase: "done", message: "二维码已过期" };
+    }
+
+    const confirmed =
+      loginStatus === "CONFIRMED" ||
+      data.success === true ||
+      data.logged_in === true ||
+      (loginStatus === "" && (data.status === 2 || Boolean(data.user_id) || Boolean(data.access_token)));
+
+    if (confirmed || cookieValue(this.jar, "z_c0")) {
+      if (!cookieValue(this.jar, "z_c0")) {
+        return { phase: "done", message: "登录已确认，但没有拿到 z_c0" };
+      }
       return { phase: "success", message: "登录成功", cookie: this.jar.cookie };
     }
-    if (data.status === 1) return { phase: "scanned", message: "已扫码，请在手机上确认" };
+
+    if (loginStatus === "SCANNED" || (loginStatus === "" && data.status === 1)) {
+      return { phase: "scanned", message: "已扫码，请在手机上确认" };
+    }
     return { phase: "pending", message: "请使用知乎 App 扫码" };
   }
 }

@@ -293,9 +293,6 @@ input[type="text"]:focus { border-color: var(--vscode-focusBorder); }
   word-break: break-word;
   font-size: 13px;
   line-height: 1.8;
-  padding: 10px 8px;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  border-radius: 4px;
 }
 .decode-meta {
   margin-top: 8px;

@@ -1,6 +1,6 @@
 {
-  "name": "zhihu",
-  "displayName": "zhihu",
+  "name": "zhihu-reading",
+  "displayName": "zhihu reading",
   "description": "浏览知乎推荐、解码盐选，并在编辑器中阅读详情与评论",
   "version": "0.1.0",
   "publisher": "kukume",

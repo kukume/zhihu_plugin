@@ -1,6 +1,6 @@
 # 知乎 VS Code 插件
 
-浏览知乎推荐、解码盐选。无需浏览器。
+侧栏浏览知乎推荐、解码盐选。无需浏览器。
 
 ## 环境要求
 
@@ -16,7 +16,7 @@ VS Code **1.123.0** 或更高版本。
 
 **方式一：扩展市场（推荐）**
 
-在 VS Code / Cursor 的扩展视图搜索 **zhihu**，或直接打开 [Marketplace 页面](https://marketplace.visualstudio.com/items?itemName=kukume.zhihu) 点击 Install。
+在 VS Code / Cursor 的扩展视图搜索 **kukume.zhihu-reading**，或直接打开 [Marketplace 页面](https://marketplace.visualstudio.com/items?itemName=kukume.zhihu-reading) 点击 Install。
 
 **方式二：从 VSIX 安装**
 
